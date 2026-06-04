@@ -145,12 +145,12 @@ class FtpClient:
 
     def list_dir_entries(self, path: str) -> List[Tuple[str, bool, int]]:
         """Non-recursive listing for the browser: (name, is_dir, size),
-        folders first then files, alphabetically."""
+        folders first then files, alphabetically. Anything that is not clearly a
+        directory (including symlinks and entries with no type) is shown as a
+        selectable file - many seedboxes expose completed downloads as symlinks."""
         out: List[Tuple[str, bool, int]] = []
         for name, facts in self._list_dir(path or "/"):
             ftype = (facts.get("type") or "").lower()
-            if ftype == "link":
-                continue
             is_dir = ftype == "dir"
             try:
                 size = int(facts.get("size") or 0)
@@ -195,13 +195,15 @@ class FtpClient:
                 if ftype == "dir":
                     if recursive:
                         stack.append(full)
-                elif ftype in ("file", ""):
+                else:
+                    # file, symlink, or unknown -> treat as a downloadable file.
+                    # RETR follows symlinks on the server side, so completed
+                    # downloads exposed as symlinks are fetched normally.
                     try:
                         size = int(facts.get("size") or 0)
                     except (TypeError, ValueError):
                         size = 0
                     yield RemoteFile(full, size, self._parse_modify(facts))
-                # links and pseudo-entries (cdir/pdir) are skipped
 
     # ---- download ----
     def download(self, rf: RemoteFile, local_path: str,

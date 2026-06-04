@@ -18,15 +18,19 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSpinBox, QStyle,
-    QSystemTrayIcon, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
-    QWidget,
+    QMessageBox, QPlainTextEdit, QProgressBar, QProgressDialog, QPushButton,
+    QScrollArea, QSpinBox, QStyle, QSystemTrayIcon, QTableWidget, QTableWidgetItem,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from config import Config, log_dir
 from database import Database
 from remotebrowser import RemoteBrowserDialog
-from worker import SyncWorker, TestWorker, human_size
+from updater import (
+    UpdateChecker, UpdateDownloader, apply_update_and_restart, current_version,
+    is_frozen,
+)
+from worker import DelugeTestWorker, SyncWorker, TestWorker, human_size
 
 ACCENT = "#06b6d4"
 
@@ -96,11 +100,20 @@ class MainWindow(QMainWindow):
         self.sync_worker = None
         self.test_thread = None
         self.test_worker = None
+        self.deluge_thread = None
+        self.deluge_worker = None
+        self.update_thread = None
+        self.update_worker = None
+        self.dl_thread = None
+        self.dl_worker = None
+        self._update_url = ""
+        self._manual_update = False
+        self._dl_dialog = None
         self._really_quit = False
         self._browser_open = False
         self.next_run = None
 
-        self.setWindowTitle("Trawl")
+        self.setWindowTitle(f"Trawl {current_version()}")
         self.resize(880, 660)
         self.setWindowIcon(self._app_icon())
 
@@ -136,6 +149,9 @@ class MainWindow(QMainWindow):
 
         if self.cfg.schedule_enabled:
             self._start_schedule(run_now=False)
+
+        if self.cfg.check_updates_on_launch:
+            QTimer.singleShot(1500, lambda: self.check_updates(manual=False))
 
     # ---------- icon ----------
     def _app_icon(self) -> QIcon:
@@ -346,6 +362,66 @@ class MainWindow(QMainWindow):
         af.addRow("", self.chk_delete)
         outer.addWidget(abox)
 
+        # --- Deluge completion check ---
+        dbox = QGroupBox("Deluge completion check (optional)")
+        df = QFormLayout(dbox)
+        df.setSpacing(10)
+        self.chk_deluge = QCheckBox("Only sync files whose torrent has finished in Deluge")
+        self.in_deluge_host = QLineEdit()
+        self.in_deluge_host.setPlaceholderText("Deluge Web UI host or IP, e.g. 10.0.0.50")
+        self.in_deluge_port = QSpinBox()
+        self.in_deluge_port.setRange(1, 65535)
+        self.in_deluge_pass = QLineEdit()
+        self.in_deluge_pass.setEchoMode(QLineEdit.EchoMode.Password)
+        self.btn_deluge_showpass = QPushButton("Show")
+        self.btn_deluge_showpass.setCheckable(True)
+        self.btn_deluge_showpass.setFixedWidth(70)
+        self.btn_deluge_showpass.toggled.connect(self._toggle_deluge_pass_echo)
+        dpass_row = QHBoxLayout()
+        dpass_row.addWidget(self.in_deluge_pass, 1)
+        dpass_row.addWidget(self.btn_deluge_showpass)
+        dpass_wrap = QWidget()
+        dpass_wrap.setLayout(dpass_row)
+        self.chk_deluge_https = QCheckBox("Use HTTPS")
+        self.chk_deluge_verify = QCheckBox("Verify TLS certificate")
+        self.btn_deluge_test = QPushButton("Test Deluge")
+        self.btn_deluge_test.clicked.connect(self.test_deluge)
+        df.addRow("", self.chk_deluge)
+        df.addRow("Host", self.in_deluge_host)
+        df.addRow("Web UI port", self.in_deluge_port)
+        df.addRow("Web UI password", dpass_wrap)
+        df.addRow("", self.chk_deluge_https)
+        df.addRow("", self.chk_deluge_verify)
+        df.addRow("", self.btn_deluge_test)
+        outer.addWidget(dbox)
+
+        # --- Updates ---
+        ubox = QGroupBox("Updates")
+        uf = QFormLayout(ubox)
+        uf.setSpacing(10)
+        self.lbl_version = QLabel(f"Current version: {current_version()}")
+        self.lbl_version.setObjectName("Subtle")
+        self.in_token = QLineEdit()
+        self.in_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.in_token.setPlaceholderText("optional - only for a private repo or rate limits")
+        self.btn_token_show = QPushButton("Show")
+        self.btn_token_show.setCheckable(True)
+        self.btn_token_show.setFixedWidth(70)
+        self.btn_token_show.toggled.connect(self._toggle_token_echo)
+        token_row = QHBoxLayout()
+        token_row.addWidget(self.in_token, 1)
+        token_row.addWidget(self.btn_token_show)
+        token_wrap = QWidget()
+        token_wrap.setLayout(token_row)
+        self.chk_update_launch = QCheckBox("Check for updates when Trawl starts")
+        self.btn_check_update = QPushButton("Check for updates now")
+        self.btn_check_update.clicked.connect(lambda: self.check_updates(manual=True))
+        uf.addRow(self.lbl_version)
+        uf.addRow("GitHub token", token_wrap)
+        uf.addRow("", self.chk_update_launch)
+        uf.addRow("", self.btn_check_update)
+        outer.addWidget(ubox)
+
         btns = QHBoxLayout()
         btn_save = QPushButton("Save")
         btn_save.setObjectName("Primary")
@@ -354,7 +430,12 @@ class MainWindow(QMainWindow):
         btns.addWidget(btn_save)
         outer.addLayout(btns)
         outer.addStretch(1)
-        return w
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(w)
+        return scroll
 
     # ---------- log ----------
     def _build_log_tab(self) -> QWidget:
@@ -431,6 +512,16 @@ class MainWindow(QMainWindow):
         self.chk_notify.setChecked(c.notify_on_complete)
         self.chk_delete.setChecked(c.delete_remote_after)
 
+        self.chk_deluge.setChecked(c.deluge_enabled)
+        self.in_deluge_host.setText(c.deluge_host)
+        self.in_deluge_port.setValue(c.deluge_port)
+        self.in_deluge_pass.setText(c.get_deluge_password())
+        self.chk_deluge_https.setChecked(c.deluge_https)
+        self.chk_deluge_verify.setChecked(c.deluge_verify_tls)
+
+        self.in_token.setText(c.get_github_token())
+        self.chk_update_launch.setChecked(c.check_updates_on_launch)
+
         self.chk_schedule.blockSignals(True)
         self.chk_schedule.setChecked(c.schedule_enabled)
         self.chk_schedule.blockSignals(False)
@@ -460,9 +551,19 @@ class MainWindow(QMainWindow):
         c.delete_remote_after = self.chk_delete.isChecked()
         c.run_on_startup = self.chk_startup.isChecked()
 
+        c.deluge_enabled = self.chk_deluge.isChecked()
+        c.deluge_host = self.in_deluge_host.text().strip()
+        c.deluge_port = self.in_deluge_port.value()
+        c.deluge_https = self.chk_deluge_https.isChecked()
+        c.deluge_verify_tls = self.chk_deluge_verify.isChecked()
+
+        c.check_updates_on_launch = self.chk_update_launch.isChecked()
+
     def _save_from_form(self) -> None:
         self._gather_into_config()
         self.cfg.set_password(self.in_pass.text())
+        self.cfg.set_deluge_password(self.in_deluge_pass.text())
+        self.cfg.set_github_token(self.in_token.text().strip())
         self.cfg.save()
         self._apply_run_on_startup(self.cfg.run_on_startup)
         self._refresh_conn_label()
@@ -483,6 +584,18 @@ class MainWindow(QMainWindow):
             QLineEdit.EchoMode.Normal if shown else QLineEdit.EchoMode.Password
         )
         self.btn_showpass.setText("Hide" if shown else "Show")
+
+    def _toggle_deluge_pass_echo(self, shown: bool) -> None:
+        self.in_deluge_pass.setEchoMode(
+            QLineEdit.EchoMode.Normal if shown else QLineEdit.EchoMode.Password
+        )
+        self.btn_deluge_showpass.setText("Hide" if shown else "Show")
+
+    def _toggle_token_echo(self, shown: bool) -> None:
+        self.in_token.setEchoMode(
+            QLineEdit.EchoMode.Normal if shown else QLineEdit.EchoMode.Password
+        )
+        self.btn_token_show.setText("Hide" if shown else "Show")
 
     def _browse_local(self) -> None:
         start = self.in_local.text().strip() or os.path.expanduser("~")
@@ -705,6 +818,165 @@ class MainWindow(QMainWindow):
     def _clear_test_refs(self) -> None:
         self.test_thread = None
         self.test_worker = None
+
+    # ---------- deluge test ----------
+    def test_deluge(self) -> None:
+        if self.deluge_thread is not None:
+            return
+        self._gather_into_config()
+        self.cfg.set_deluge_password(self.in_deluge_pass.text())
+        if not self.cfg.deluge_host:
+            QMessageBox.warning(self, "Trawl", "Enter the Deluge Web UI host first.")
+            return
+        self.btn_deluge_test.setEnabled(False)
+        self.btn_deluge_test.setText("Testing...")
+        self.deluge_thread = QThread(self)
+        self.deluge_worker = DelugeTestWorker(self.cfg)
+        self.deluge_worker.moveToThread(self.deluge_thread)
+        self.deluge_thread.started.connect(self.deluge_worker.run)
+        self.deluge_worker.finished.connect(self._on_deluge_test_finished)
+        self.deluge_worker.finished.connect(self.deluge_thread.quit)
+        self.deluge_worker.finished.connect(self.deluge_worker.deleteLater)
+        self.deluge_thread.finished.connect(self.deluge_thread.deleteLater)
+        self.deluge_thread.finished.connect(self._clear_deluge_refs)
+        self.deluge_thread.start()
+
+    @pyqtSlot(bool, str)
+    def _on_deluge_test_finished(self, ok: bool, message: str) -> None:
+        self.btn_deluge_test.setEnabled(True)
+        self.btn_deluge_test.setText("Test Deluge")
+        self.append_log("info" if ok else "error", message.replace("\n", " "))
+        if ok:
+            QMessageBox.information(self, "Trawl - Deluge OK", message)
+        else:
+            QMessageBox.critical(
+                self, "Trawl - Deluge failed",
+                message + "\n\nCheck the host/port, the Web UI password, and that "
+                          "the Deluge Web UI (deluge-web) is running and reachable.")
+
+    def _clear_deluge_refs(self) -> None:
+        self.deluge_thread = None
+        self.deluge_worker = None
+
+    # ---------- updates ----------
+    def check_updates(self, manual: bool) -> None:
+        if self.update_thread is not None or self.dl_thread is not None:
+            return
+        token = self.in_token.text().strip()
+        self.cfg.set_github_token(token)
+        self._manual_update = manual
+        if manual:
+            self.btn_check_update.setEnabled(False)
+            self.btn_check_update.setText("Checking...")
+        self.update_thread = QThread(self)
+        self.update_worker = UpdateChecker(token)
+        self.update_worker.moveToThread(self.update_thread)
+        self.update_thread.started.connect(self.update_worker.run)
+        self.update_worker.result.connect(self._on_update_result)
+        self.update_worker.error.connect(self._on_update_error)
+        self.update_worker.result.connect(self.update_thread.quit)
+        self.update_worker.error.connect(self.update_thread.quit)
+        self.update_worker.result.connect(self.update_worker.deleteLater)
+        self.update_thread.finished.connect(self.update_thread.deleteLater)
+        self.update_thread.finished.connect(self._clear_update_refs)
+        self.update_thread.start()
+
+    @pyqtSlot(bool, str, str, str)
+    def _on_update_result(self, available: bool, latest: str, url: str, notes: str) -> None:
+        if self._manual_update:
+            self.btn_check_update.setEnabled(True)
+            self.btn_check_update.setText("Check for updates now")
+        if not available:
+            self.append_log("info", f"No update available (current {current_version()}).")
+            if self._manual_update:
+                QMessageBox.information(
+                    self, "Trawl", f"You're up to date (version {current_version()}).")
+            return
+        self.append_log("info", f"Update available: {latest}.")
+        snippet = (notes or "").strip()
+        if len(snippet) > 600:
+            snippet = snippet[:600] + "..."
+        body = f"Trawl {latest} is available (you have {current_version()}).\n\nUpdate now?"
+        if snippet:
+            body += f"\n\nRelease notes:\n{snippet}"
+        if QMessageBox.question(self, "Trawl - update available", body) == QMessageBox.StandardButton.Yes:
+            self._start_update_download(url)
+
+    @pyqtSlot(str)
+    def _on_update_error(self, message: str) -> None:
+        if self._manual_update:
+            self.btn_check_update.setEnabled(True)
+            self.btn_check_update.setText("Check for updates now")
+            QMessageBox.warning(self, "Trawl - update check failed", message)
+        self.append_log("warn", "Update check failed: " + message.replace("\n", " "))
+
+    def _clear_update_refs(self) -> None:
+        self.update_thread = None
+        self.update_worker = None
+
+    def _start_update_download(self, url: str) -> None:
+        if not is_frozen():
+            QMessageBox.information(
+                self, "Trawl",
+                "Self-update only works in the built Trawl.exe. When running from "
+                "source, pull the latest code and rebuild instead.")
+            return
+        self._dl_dialog = QProgressDialog("Downloading update...", "Cancel", 0, 100, self)
+        self._dl_dialog.setWindowTitle("Trawl - updating")
+        self._dl_dialog.setMinimumDuration(0)
+        self._dl_dialog.setAutoClose(False)
+        self._dl_dialog.setAutoReset(False)
+
+        self.dl_thread = QThread(self)
+        self.dl_worker = UpdateDownloader(url, self.in_token.text().strip())
+        self.dl_worker.moveToThread(self.dl_thread)
+        self.dl_thread.started.connect(self.dl_worker.run)
+        self.dl_worker.progress.connect(self._on_update_progress)
+        self.dl_worker.finished.connect(self._on_update_dl_finished)
+        self.dl_worker.finished.connect(self.dl_thread.quit)
+        self.dl_worker.finished.connect(self.dl_worker.deleteLater)
+        self.dl_thread.finished.connect(self.dl_thread.deleteLater)
+        self.dl_thread.finished.connect(self._clear_dl_refs)
+        self._dl_dialog.canceled.connect(lambda: self.dl_worker.request_stop() if self.dl_worker else None)
+        self.dl_thread.start()
+
+    @pyqtSlot(int, int)
+    def _on_update_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            self._dl_dialog.setMaximum(total)
+            self._dl_dialog.setValue(done)
+            self._dl_dialog.setLabelText(
+                f"Downloading update... {human_size(done)} / {human_size(total)}")
+        else:
+            self._dl_dialog.setMaximum(0)
+
+    @pyqtSlot(bool, str)
+    def _on_update_dl_finished(self, ok: bool, path_or_error: str) -> None:
+        self._dl_dialog.close()
+        if not ok:
+            if path_or_error != "Cancelled.":
+                QMessageBox.warning(self, "Trawl - update failed", path_or_error)
+                self.append_log("error", "Update download failed: " + path_or_error)
+            return
+        self.append_log("info", "Update downloaded; restarting to apply.")
+        if apply_update_and_restart(path_or_error):
+            self._really_quit = True
+            if self.sync_worker is not None:
+                self.sync_worker.request_stop()
+            if self.sync_thread is not None:
+                self.sync_thread.wait(3000)
+            self.cfg.save()
+            self.db.close()
+            QApplication.instance().quit()
+        else:
+            QMessageBox.information(
+                self, "Trawl",
+                f"Update downloaded to:\n{path_or_error}\n\nSelf-replace only runs "
+                f"in the built Trawl.exe.")
+
+    def _clear_dl_refs(self) -> None:
+        self.dl_thread = None
+        self.dl_worker = None
 
     # ---------- scheduling ----------
     def _toggle_schedule(self, on: bool) -> None:

@@ -16,6 +16,8 @@ Written by LJ "HawaiizFynest" Eblacas
 - Lives quietly in the **system tray** and can launch with Windows
 - **Resumes** interrupted downloads instead of starting over
 - Skips files that are still being written on the server (configurable minimum file age)
+- Optionally checks **Deluge** and only pulls files whose torrent has finished
+- **Updates itself** from the latest GitHub release
 - Recreates the remote folder structure on your desktop (optional)
 - Keeps a transfer history and a live log
 
@@ -73,7 +75,8 @@ seedbox: double-click folders to navigate, select one (or more) files, then
 click **Download selected**. Those files download straight to your destination
 folder and nothing else is touched - the scheduler and the full scan stay out of
 the way. It is the quickest way to confirm everything works before you turn on
-scheduled syncing.
+scheduled syncing. Completed downloads exposed as symlinks (common on seedboxes)
+appear as selectable files too.
 
 ## How it works
 
@@ -95,6 +98,38 @@ Most seedboxes use **explicit FTPS**, which is the default. If your provider's
 certificate is self-signed (very common), leave **Verify TLS certificate**
 unchecked. Turn it on only if the provider has a valid public certificate. Plain
 FTP is available but sends your password in the clear and should be avoided.
+
+## Deluge completion check (optional)
+
+If your files come from torrents, Trawl can ask Deluge whether a torrent has
+actually finished before pulling its files. Enable it under **Settings →
+Deluge completion check**, enter your Deluge **Web UI** host/IP (default port
+**8112**) and the Web UI password, and click **Test Deluge**.
+
+When enabled, before each sync Trawl fetches the list of torrents and their
+state, and skips any file whose torrent is still downloading (matched by the
+torrent name against the file's folder or filename). A finished torrent, or a
+file that matches no torrent at all, is allowed through. If Deluge can't be
+reached, Trawl logs a warning and falls back to the minimum-file-age check
+rather than halting, so a Deluge outage never stops syncing.
+
+This talks to the Deluge **Web UI** (deluge-web), the same thing you log into in
+a browser - not the raw daemon on port 58846.
+
+## Automatic updates
+
+Trawl can update itself from the latest GitHub release. Under **Settings →
+Updates** you'll see the current version, an optional GitHub token field, a
+**Check for updates when Trawl starts** toggle, and a **Check for updates now**
+button. When a newer release is found, Trawl offers to update; if you accept, it
+downloads the new `Trawl.exe`, then closes, swaps itself out for the new build
+and relaunches.
+
+Because the release is on a public repo, no token is needed. The token field is
+only there if you make the repo private again, or if the unauthenticated GitHub
+rate limit gets in the way - paste a fine-grained token with read access and
+it's stored in Windows Credential Manager. Self-replacement only happens in the
+built `Trawl.exe`; running from source, you just pull and rebuild.
 
 ## Where your data lives
 
@@ -135,13 +170,17 @@ the seedbox, so only enable it if that is genuinely what you want.
 Trawl/
   trawl.py          entry point + crash logging + dark theme
   mainwindow.py     UI (tabs, tray, scheduler) + background-thread wiring
-  worker.py         SyncWorker / TestWorker (run on a QThread)
+  worker.py         SyncWorker / TestWorker / DelugeTestWorker (QThread)
   remotebrowser.py  remote file browser dialog for picking single files
   ftpclient.py      FTP/FTPS connect, recursive walk, resumable download
+  deluge.py         Deluge Web UI JSON-RPC client (completion check)
+  updater.py        GitHub-release self-update (download + swap + restart)
+  version.py        version string
   database.py       SQLite download history
-  config.py         settings (JSON) + password (keyring) + paths
+  config.py         settings (JSON) + secrets (keyring) + paths
   requirements.txt
   trawl.spec        PyInstaller one-file build
+  .github/workflows/build.yml   builds Trawl.exe on a v* tag
   README.md
   PROJECT_CONTEXT.md
 ```

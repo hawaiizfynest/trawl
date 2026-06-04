@@ -18,6 +18,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from config import Config
 from database import Database
+from deluge import DelugeClient
 from ftpclient import FtpClient, RemoteFile
 
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -70,6 +71,30 @@ class TestWorker(QObject):
             self.finished.emit(False, f"{type(e).__name__}: {e}")
 
 
+class DelugeTestWorker(QObject):
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, cfg: Config):
+        super().__init__()
+        self.cfg = cfg
+
+    @pyqtSlot()
+    def run(self) -> None:
+        try:
+            client = DelugeClient(
+                self.cfg.deluge_host, self.cfg.deluge_port,
+                self.cfg.get_deluge_password(), self.cfg.deluge_https,
+                self.cfg.deluge_verify_tls)
+            client.login()
+            torrents = client.get_torrents()
+            done = sum(1 for t in torrents if DelugeClient.is_complete(t))
+            self.finished.emit(
+                True, f"Connected to Deluge. {len(torrents)} torrent(s): "
+                      f"{done} complete, {len(torrents) - done} still downloading.")
+        except Exception as e:
+            self.finished.emit(False, f"{type(e).__name__}: {e}")
+
+
 class SyncWorker(QObject):
     log = pyqtSignal(str, str)                 # level, message
     status = pyqtSignal(str)                    # current operation line
@@ -85,6 +110,37 @@ class SyncWorker(QObject):
 
     def request_stop(self) -> None:
         self._stop = True
+
+    def _deluge_incomplete(self):
+        """Set of lowercased torrent names that are NOT finished, or None to
+        skip Deluge gating (disabled, or the check failed)."""
+        if not self.cfg.deluge_enabled or not self.cfg.deluge_host:
+            return None
+        try:
+            client = DelugeClient(
+                self.cfg.deluge_host, self.cfg.deluge_port,
+                self.cfg.get_deluge_password(), self.cfg.deluge_https,
+                self.cfg.deluge_verify_tls)
+            client.login()
+            names = {n.lower() for n in client.incomplete_names()}
+            self.log.emit("info", f"Deluge: {len(names)} torrent(s) still downloading.")
+            return names
+        except Exception as e:
+            self.log.emit("warn", f"Deluge check skipped ({type(e).__name__}: {e}); "
+                                  f"using the file-age check instead.")
+            return None
+
+    @staticmethod
+    def _belongs_to_incomplete(remote_path: str, incomplete: set) -> bool:
+        parts = [p.lower() for p in remote_path.split("/") if p]
+        if not parts:
+            return False
+        base = parts[-1]
+        partset = set(parts)
+        for name in incomplete:
+            if name in partset or name == base:
+                return True
+        return False
 
     def _local_path_for(self, rf: RemoteFile, root: str) -> str:
         rel = rf.path[len(root):] if rf.path.startswith(root) else os.path.basename(rf.path)
@@ -118,8 +174,14 @@ class SyncWorker(QObject):
 
             now = time.time()
             min_age = self.cfg.min_file_age_minutes * 60
+            incomplete = self._deluge_incomplete()
             eligible = []
             for rf in all_files:
+                if incomplete is not None and self._belongs_to_incomplete(rf.path, incomplete):
+                    summary["skipped"] += 1
+                    self.log.emit("info", f"Skipping {os.path.basename(rf.path)} - "
+                                          f"torrent not finished.")
+                    continue
                 if min_age and rf.modify_epoch and (now - rf.modify_epoch) < min_age:
                     summary["skipped"] += 1
                     continue

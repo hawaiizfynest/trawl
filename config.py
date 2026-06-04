@@ -76,6 +76,16 @@ class Config:
     run_on_startup: bool = False
     notify_on_complete: bool = True
 
+    # --- Deluge completion check (optional) ---
+    deluge_enabled: bool = False
+    deluge_host: str = ""
+    deluge_port: int = 8112
+    deluge_https: bool = False
+    deluge_verify_tls: bool = False
+
+    # --- Updates ---
+    check_updates_on_launch: bool = True
+
     # ---- password (keyring) ----
     def _secret_account(self) -> str:
         return f"{self.host}:{self.port}:{self.username}"
@@ -93,6 +103,45 @@ class Config:
             return False
         try:
             keyring.set_password(APP_NAME, self._secret_account(), password or "")
+            return True
+        except Exception:
+            return False
+
+    # ---- Deluge password (keyring) ----
+    def _deluge_account(self) -> str:
+        return f"deluge:{self.deluge_host}:{self.deluge_port}"
+
+    def get_deluge_password(self) -> str:
+        if not _KEYRING_OK or not self.deluge_host:
+            return ""
+        try:
+            return keyring.get_password(APP_NAME, self._deluge_account()) or ""
+        except Exception:
+            return ""
+
+    def set_deluge_password(self, password: str) -> bool:
+        if not _KEYRING_OK or not self.deluge_host:
+            return False
+        try:
+            keyring.set_password(APP_NAME, self._deluge_account(), password or "")
+            return True
+        except Exception:
+            return False
+
+    # ---- GitHub token for updates (keyring) ----
+    def get_github_token(self) -> str:
+        if not _KEYRING_OK:
+            return ""
+        try:
+            return keyring.get_password(APP_NAME, "github_token") or ""
+        except Exception:
+            return ""
+
+    def set_github_token(self, token: str) -> bool:
+        if not _KEYRING_OK:
+            return False
+        try:
+            keyring.set_password(APP_NAME, "github_token", token or "")
             return True
         except Exception:
             return False
