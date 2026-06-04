@@ -576,6 +576,7 @@
   ('queue', 'C:\\Python314\\Lib\\queue.py', 'PYMODULE'),
   ('quopri', 'C:\\Python314\\Lib\\quopri.py', 'PYMODULE'),
   ('random', 'C:\\Python314\\Lib\\random.py', 'PYMODULE'),
+  ('remotebrowser', 'F:\\GitHub\\Repos\\trawl\\remotebrowser.py', 'PYMODULE'),
   ('rlcompleter', 'C:\\Python314\\Lib\\rlcompleter.py', 'PYMODULE'),
   ('runpy', 'C:\\Python314\\Lib\\runpy.py', 'PYMODULE'),
   ('secrets', 'C:\\Python314\\Lib\\secrets.py', 'PYMODULE'),

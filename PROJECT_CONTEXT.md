@@ -82,6 +82,11 @@ Decided up front with the user:
 - `trawl.spec` - PyInstaller **one-file** build. Uses `collect_submodules` for
   `keyring` and `win32ctypes` so the credential backend bundles correctly; picks
   up `trawl.ico` if present. Build: `python -m PyInstaller trawl.spec`.
+- `.github/workflows/build.yml` - GitHub Actions. On a `v*` tag push it builds
+  `Trawl.exe` on `windows-latest` (PyInstaller one-file) and attaches it to a
+  GitHub Release, matching the tag-push release pattern used across the other
+  tools. UPX is not on the runner, so the `upx=True` flag in the spec is simply
+  skipped - harmless.
 
 ## Settings (Config fields)
 

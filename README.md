@@ -44,8 +44,17 @@ The finished `Trawl.exe` lands in the `dist` folder. To give it a custom icon,
 drop a `trawl.ico` next to `trawl.spec` before building and it will be picked up
 automatically.
 
-> The GitHub Actions side of releases is wired the same way as the other tools:
-> a build runs on a version tag pushed through GitHub Desktop.
+### Automated builds and releases
+
+A GitHub Actions workflow (`.github/workflows/build.yml`) builds the executable
+for you. When you push a version tag, it spins up a Windows runner, builds
+`Trawl.exe`, and attaches it to a GitHub Release for that tag (the `.exe` is also
+saved as a run artifact).
+
+To cut a release from GitHub Desktop: open **History**, right-click the commit
+and choose **Create Tag**, name it `v1.0.0` (any `v*` tag triggers a build),
+then **Push origin**. The build runs on its own and the finished `Trawl.exe`
+shows up under the repository's **Releases**.
 
 ## First-run setup
 
