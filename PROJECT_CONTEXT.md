@@ -57,7 +57,7 @@ Decided up front with the user:
   TLS session on the data connection - required by most seedboxes and the fix for
   'EOF occurred in violation of protocol'; the SSL context is also pinned to TLS
   1.2 to avoid data-channel 'BAD_LENGTH'/record errors some servers throw under
-  TLS 1.3), honours `verify_tls` (default False -> `CERT_NONE`, since seedbox
+  TLS 1.3), honours `verify_tls`. A `ftps_encrypt_data` toggle (Connection tab: 'Encrypt file transfers', default on) switches the FTPS data channel between prot_p and prot_c; prot_c keeps the login encrypted but sends file bytes in the clear, eliminating SSL data-channel errors (EOF/BAD_LENGTH) on servers that won't transfer cleanly over TLS (default False -> `CERT_NONE`, since seedbox
   certs are usually self-signed). `walk(root, recursive)` uses **MLSD** first
   (reliable type/size/modify), falling back to a tolerant Unix **LIST** parser
   (`_LIST_RE`). `download()` resumes via `.part` + FTP `REST`, falls back to a

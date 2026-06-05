@@ -105,6 +105,8 @@ this resolves the common seedbox transfer error "EOF occurred in violation of
 protocol". It also pins TLS 1.2, which avoids data-channel errors such as
 "BAD_LENGTH" that some servers throw under TLS 1.3.
 
+If transfers still fail with SSL errors on a stubborn server, turn off **Encrypt file transfers** on the Connection tab. Your login stays encrypted, but the file data transfers over a clear data channel (prot_c), which removes the SSL data-channel errors entirely.
+
 ## Deluge completion check (optional)
 
 If your files come from torrents, Trawl can ask Deluge whether a torrent has

@@ -275,6 +275,13 @@ class MainWindow(QMainWindow):
             "Leave off if your seedbox uses a self-signed certificate (common). "
             "Turn on only if the provider has a valid public certificate."
         )
+        self.chk_encrypt_data = QCheckBox("Encrypt file transfers")
+        self.chk_encrypt_data.setToolTip(
+            "Turn this OFF if downloads fail with SSL errors such as "
+            "'BAD_LENGTH' or 'EOF occurred in violation of protocol'.\n"
+            "Your login stays encrypted either way; this only controls whether "
+            "the file data itself is sent over TLS. (FTPS only.)"
+        )
         self.in_timeout = QSpinBox()
         self.in_timeout.setRange(5, 300)
         self.in_timeout.setSuffix(" s")
@@ -286,6 +293,7 @@ class MainWindow(QMainWindow):
         form.addRow("Mode", self.in_mode)
         form.addRow("", self.chk_passive)
         form.addRow("", self.chk_verify)
+        form.addRow("", self.chk_encrypt_data)
         form.addRow("Timeout", self.in_timeout)
         outer.addWidget(box)
 
@@ -492,6 +500,7 @@ class MainWindow(QMainWindow):
         self.in_mode.setCurrentIndex(i if i >= 0 else 0)
         self.chk_passive.setChecked(c.passive)
         self.chk_verify.setChecked(c.verify_tls)
+        self.chk_encrypt_data.setChecked(c.ftps_encrypt_data)
         self.in_timeout.setValue(c.timeout)
 
         self.in_remote.setText(c.remote_dir)
@@ -529,6 +538,7 @@ class MainWindow(QMainWindow):
         c.mode = self.in_mode.currentData()
         c.passive = self.chk_passive.isChecked()
         c.verify_tls = self.chk_verify.isChecked()
+        c.ftps_encrypt_data = self.chk_encrypt_data.isChecked()
         c.timeout = self.in_timeout.value()
 
         c.remote_dir = self.in_remote.text().strip() or "/"

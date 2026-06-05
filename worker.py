@@ -43,6 +43,7 @@ def _client_from_config(cfg: Config) -> FtpClient:
         host=cfg.host, port=cfg.port, username=cfg.username,
         password=cfg.get_password(), mode=cfg.mode, passive=cfg.passive,
         verify_tls=cfg.verify_tls, timeout=cfg.timeout,
+        encrypt_data=cfg.ftps_encrypt_data,
     )
 
 

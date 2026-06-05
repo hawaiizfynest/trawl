@@ -58,7 +58,7 @@ class RemoteSession(QObject):
             host=self.cfg.host, port=self.cfg.port, username=self.cfg.username,
             password=self.cfg.get_password(), mode=self.cfg.mode,
             passive=self.cfg.passive, verify_tls=self.cfg.verify_tls,
-            timeout=self.cfg.timeout,
+            timeout=self.cfg.timeout, encrypt_data=self.cfg.ftps_encrypt_data,
         )
 
     @pyqtSlot()

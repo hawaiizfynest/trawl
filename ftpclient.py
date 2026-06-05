@@ -85,7 +85,8 @@ _LIST_RE = re.compile(
 class FtpClient:
     def __init__(self, host: str, port: int, username: str, password: str,
                  mode: str = "ftps_explicit", passive: bool = True,
-                 verify_tls: bool = False, timeout: int = 30):
+                 verify_tls: bool = False, timeout: int = 30,
+                 encrypt_data: bool = True):
         self.host = host
         self.port = int(port)
         self.username = username
@@ -94,6 +95,11 @@ class FtpClient:
         self.passive = passive
         self.verify_tls = verify_tls
         self.timeout = int(timeout)
+        # When False, FTPS connections use a clear data channel (prot_c): the
+        # login stays TLS-encrypted but file bytes transfer unencrypted. This
+        # sidesteps SSL data-channel errors (EOF / BAD_LENGTH) on servers that
+        # don't transfer file data cleanly over TLS.
+        self.encrypt_data = encrypt_data
         self.ftp: Optional[ftplib.FTP] = None
 
     # ---- TLS context ----
@@ -121,13 +127,19 @@ class FtpClient:
             ftp = _ImplicitReuseFTP_TLS(context=self._ssl_context(), timeout=self.timeout)
             ftp.connect(self.host, self.port or 990)
             ftp.login(self.username, self.password)
-            ftp.prot_p()
+            if self.encrypt_data:
+                ftp.prot_p()
+            else:
+                ftp.prot_c()
         else:  # ftps_explicit (default)
             ftp = _ReuseFTP_TLS(context=self._ssl_context(), timeout=self.timeout)
             ftp.connect(self.host, self.port or 21)
             ftp.auth()
             ftp.login(self.username, self.password)
-            ftp.prot_p()
+            if self.encrypt_data:
+                ftp.prot_p()
+            else:
+                ftp.prot_c()
         ftp.set_pasv(self.passive)
         self.ftp = ftp
         try:

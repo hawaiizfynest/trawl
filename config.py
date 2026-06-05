@@ -57,6 +57,7 @@ class Config:
     mode: str = "ftps_explicit"   # "ftp" | "ftps_explicit" | "ftps_implicit"
     passive: bool = True
     verify_tls: bool = False
+    ftps_encrypt_data: bool = True   # prot_p; set False for a clear data channel (prot_c)
     timeout: int = 30
 
     # --- Sync ---
