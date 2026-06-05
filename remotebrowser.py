@@ -117,7 +117,7 @@ class RemoteSession(QObject):
                     self.dl_progress.emit(_n, done, total)
 
                 self.log.emit("info", f"Downloading {name} ({human_size(size)})...")
-                result = self.client.download(rf, local_path, cb, lambda: self._stop)
+                result, detail = self.client.download(rf, local_path, cb, lambda: self._stop)
                 if result == "completed":
                     db.record(remote_path, int(size), None, local_path, "completed")
                     summary["downloaded"] += 1
@@ -129,7 +129,9 @@ class RemoteSession(QObject):
                     break
                 else:
                     summary["failed"] += 1
-                    self.dl_file_done.emit(name, result)
+                    self.dl_file_done.emit(name, "write error" if result == "write_error" else result)
+                    if detail:
+                        self.log.emit("error", f"{name}: {detail}")
         finally:
             db.close()
 

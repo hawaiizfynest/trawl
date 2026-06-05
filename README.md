@@ -56,7 +56,7 @@ saved as a run artifact).
 To cut a release from GitHub Desktop: open **History**, right-click the commit
 and choose **Create Tag**, name it `v1.0.0` (any `v*` tag triggers a build),
 then **Push origin**. The build runs on its own and the finished `Trawl.exe`
-shows up under the repository's **Releases**.
+shows up under the repository's **Releases**. The build sets the app's version from the tag automatically, so you never edit a version file - tag `v1.1.5` (or `1.1.5`) and that's the version the app reports.
 
 ## First-run setup
 
@@ -176,6 +176,27 @@ the seedbox, so only enable it if that is genuinely what you want.
   server; raise the *minimum file age*.
 - **Nothing is found** — confirm the *remote folder* path is correct and that
   *Scan subfolders* is on if your files live in subdirectories.
+
+## If downloads or updates fail with "Permission denied" (errno 13)
+
+This is Windows blocking Trawl from writing files, and it is **not** fixed by
+running as administrator. The usual cause is **Controlled Folder Access**
+(Windows ransomware protection) blocking an unsigned app from writing to
+protected folders like Desktop, Documents, Pictures or Downloads - or the
+destination/exe sitting in a folder your account can't write to.
+
+Fixes, easiest first:
+
+- Point the **destination folder** (and keep `Trawl.exe`) somewhere plain and
+  writable, e.g. `C:\Trawl` or `D:\Seedbox`, not under Desktop/Documents.
+- If you want to keep using a protected folder, allow Trawl through Controlled
+  Folder Access: **Windows Security -> Virus & threat protection -> Ransomware
+  protection -> Allow an app through Controlled folder access -> Add `Trawl.exe`**.
+- The log now names the exact path it failed to write (Settings -> Log, or
+  `%APPDATA%\Trawl\logs\trawl.log`), which tells you which folder is blocked.
+
+Updates download to your temp folder (always writable) and only swap the exe on
+restart, so the destination-folder fix above usually clears update errors too.
 
 ## Project structure
 

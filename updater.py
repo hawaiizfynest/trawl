@@ -163,8 +163,9 @@ class UpdateDownloader(QObject):
     @pyqtSlot()
     def run(self) -> None:
         try:
-            target_dir = os.path.dirname(sys.executable) if is_frozen() else tempfile.gettempdir()
-            new_path = os.path.join(target_dir, "Trawl.new.exe")
+            # Download to the temp dir, which is always writable and not subject
+            # to Controlled Folder Access; the swap step moves it into place.
+            new_path = os.path.join(tempfile.gettempdir(), "Trawl.new.exe")
             opener = urllib.request.build_opener(_StripAuthOnRedirect)
             req = urllib.request.Request(
                 self.asset_api_url,

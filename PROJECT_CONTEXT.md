@@ -58,7 +58,9 @@ Decided up front with the user:
   (reliable type/size/modify), falling back to a tolerant Unix **LIST** parser
   (`_LIST_RE`). `download()` resumes via `.part` + FTP `REST`, falls back to a
   clean restart if `REST` is refused, verifies final size, then renames. Returns
-  `completed` / `stopped` / `size_mismatch` / `error`. `list_dir_entries(path)`
+  `(status, detail)` where status is `completed` / `stopped` / `size_mismatch` /
+  `write_error` (local permission/disk, e.g. Controlled Folder Access) / `error`
+  (server) - detail carries the real message so failures are diagnosable. `list_dir_entries(path)`
   gives a non-recursive `(name, is_dir, size)` listing for the browser. Both the
   walk and the browser listing treat **symlinks (and unknown types) as files**,
   not skipped - seedboxes often expose completed downloads as symlinks, and RETR
@@ -93,7 +95,7 @@ Decided up front with the user:
   API url with `Accept: application/octet-stream` (with a redirect handler that
   drops the auth header on the storage redirect). Token is **optional** (only
   needed for a private repo or to dodge the unauthenticated rate limit) and comes
-  from keyring. `apply_update_and_restart()` writes a detached batch that waits
+  from keyring. Downloads land in `%TEMP%` (always writable, dodges Controlled Folder Access); `apply_update_and_restart()` writes a detached batch that waits
   on this PID, deletes the old exe, moves the new one in and relaunches - frozen
   Windows only.
 - `version.py` - `__version__` (currently `1.1.2`). Bump and tag to release.
@@ -110,8 +112,11 @@ Decided up front with the user:
   up `trawl.ico` if present. Build: `python -m PyInstaller trawl.spec`.
 - `.github/workflows/build.yml` - GitHub Actions. On a `v*` tag push it builds
   `Trawl.exe` on `windows-latest` (PyInstaller one-file) and attaches it to a
-  GitHub Release, matching the tag-push release pattern used across the other
-  tools. UPX is not on the runner, so the `upx=True` flag in the spec is simply
+  GitHub Release. A 'Set version from tag' step overwrites `version.py` with
+  `GITHUB_REF_NAME` (minus a leading `v`) before building, so the exe's reported
+  version always matches the tag - do not hand-edit version.py for releases. The
+  trigger matches both `v[0-9]*` and bare `[0-9]*` tags. The spec exposes
+  `uac_admin` (default False); admin does NOT bypass Controlled Folder Access. UPX is not on the runner, so the `upx=True` flag in the spec is simply
   skipped - harmless.
 
 ## Settings (Config fields)

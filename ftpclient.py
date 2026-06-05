@@ -208,21 +208,25 @@ class FtpClient:
     # ---- download ----
     def download(self, rf: RemoteFile, local_path: str,
                  progress_cb: Callable[[int, int], None],
-                 should_stop: Callable[[], bool]) -> str:
-        """Returns one of: 'completed', 'stopped', 'size_mismatch', 'error'."""
+                 should_stop: Callable[[], bool]):
+        """Returns (status, detail). status is one of:
+        'completed', 'stopped', 'size_mismatch', 'write_error', 'error'.
+        detail carries the underlying message on failure (empty on success)."""
         part = local_path + ".part"
-        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-
-        offset = 0
-        if os.path.exists(part):
-            existing = os.path.getsize(part)
-            if rf.size and existing == rf.size:
-                os.replace(part, local_path)
-                return "completed"
-            if rf.size and existing > rf.size:
-                os.remove(part)
-            else:
-                offset = existing
+        try:
+            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+            offset = 0
+            if os.path.exists(part):
+                existing = os.path.getsize(part)
+                if rf.size and existing == rf.size:
+                    os.replace(part, local_path)
+                    return ("completed", "")
+                if rf.size and existing > rf.size:
+                    os.remove(part)
+                else:
+                    offset = existing
+        except OSError as e:
+            return ("write_error", str(e))
 
         written = [offset]
 
@@ -240,23 +244,31 @@ class FtpClient:
         try:
             try:
                 open_and_fetch(offset, "ab" if offset else "wb")
-            except (ftplib.error_perm, ftplib.error_temp) as e:
+            except (ftplib.error_perm, ftplib.error_temp):
                 # Server likely refused REST/resume - restart from scratch.
                 if offset:
                     offset = 0
                     written[0] = 0
                     open_and_fetch(0, "wb")
                 else:
-                    raise e
+                    raise
         except AbortDownload:
-            return "stopped"
-        except ftplib.all_errors:
-            return "error"
+            return ("stopped", "")
+        except OSError as e:
+            # local file system problems (permission denied, disk full, ...)
+            return ("write_error", str(e))
+        except ftplib.all_errors as e:
+            # server / transfer problems
+            return ("error", str(e))
 
-        if rf.size and os.path.getsize(part) != rf.size:
-            return "size_mismatch"   # keep .part so a later run can resume
-        os.replace(part, local_path)
-        return "completed"
+        try:
+            if rf.size and os.path.getsize(part) != rf.size:
+                return ("size_mismatch",
+                        f"expected {rf.size} bytes, got {os.path.getsize(part)}")
+            os.replace(part, local_path)
+        except OSError as e:
+            return ("write_error", str(e))
+        return ("completed", "")
 
     def delete(self, remote_path: str) -> bool:
         try:

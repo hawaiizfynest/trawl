@@ -1,2 +1,2 @@
-"""Trawl version. Bump this and tag the matching vX.Y.Z release on GitHub."""
-__version__ = "1.1.2"
+"""Trawl version. At release time, GitHub Actions overwrites this with the git tag."""
+__version__ = "1.1.4"

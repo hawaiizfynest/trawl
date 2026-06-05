@@ -226,7 +226,7 @@ class SyncWorker(QObject):
                     )
 
                 self.log.emit("info", f"Downloading {name} ({human_size(rf.size)})...")
-                result = client.download(rf, local_path, progress_cb, lambda: self._stop)
+                result, detail = client.download(rf, local_path, progress_cb, lambda: self._stop)
 
                 if result == "completed":
                     db.record(rf.path, rf.size, rf.modify_epoch, local_path, "completed")
@@ -245,11 +245,16 @@ class SyncWorker(QObject):
                 elif result == "size_mismatch":
                     summary["failed"] += 1
                     self.transfer.emit(name, rf.size, "incomplete")
-                    self.log.emit("error", f"{name} did not match expected size; will retry next run.")
+                    self.log.emit("error", f"{name} did not match expected size ({detail}); "
+                                          f"will retry next run.")
+                elif result == "write_error":
+                    summary["failed"] += 1
+                    self.transfer.emit(name, rf.size, "write error")
+                    self.log.emit("error", f"Could not save {name} to the destination folder: {detail}")
                 else:
                     summary["failed"] += 1
                     self.transfer.emit(name, rf.size, "error")
-                    self.log.emit("error", f"Failed to download {name}.")
+                    self.log.emit("error", f"Failed to download {name}: {detail}")
 
                 self.overall.emit(index + 1, total)
 

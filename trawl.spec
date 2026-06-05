@@ -59,4 +59,9 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_file,
+    # Set uac_admin=True to make the app request elevation (UAC) on every
+    # launch. Note: this does NOT bypass Controlled Folder Access, and it can
+    # interfere with silent "run on startup". Usually a writable install folder
+    # is the better fix.
+    uac_admin=False,
 )

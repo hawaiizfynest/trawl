@@ -3,7 +3,8 @@ name: Build Trawl
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*'      # v1.1.2, v0.3.0
+      - '[0-9]*'       # 1.1.2, 0.3.0 (no v)
 
 permissions:
   contents: write
@@ -26,6 +27,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+
+      - name: Set version from tag
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          printf '"""Trawl version (set at build time from the git tag)."""\n__version__ = "%s"\n' "$TAG" > version.py
+          echo "Building version $TAG"
 
       - name: Build executable
         run: python -m PyInstaller trawl.spec
