@@ -1,9 +1,14 @@
 """
 Trawl - Deluge Web UI client (JSON-RPC).
 
-Talks to the Deluge Web UI (deluge-web, default port 8112) over its JSON-RPC
-endpoint so a sync can find out which torrents have finished downloading and
-avoid grabbing files that are still in progress.
+Talks to the Deluge Web UI (deluge-web) over its JSON-RPC endpoint so a sync can
+find out which torrents have finished downloading and avoid grabbing files that
+are still in progress.
+
+Configured with the full Web UI URL, which handles seedboxes that serve Deluge
+over HTTPS behind a reverse proxy at a subpath (e.g.
+https://you.example.com/deluge/) as well as a plain local install
+(http://10.0.0.50:8112). The JSON endpoint is the URL with "/json" appended.
 
 This targets the Web UI (the thing you log into in a browser with a password),
 not the raw daemon RPC on port 58846.
@@ -17,6 +22,7 @@ import json
 import ssl
 import urllib.request
 from typing import List
+from urllib.parse import urlparse
 
 
 class DelugeError(Exception):
@@ -24,18 +30,19 @@ class DelugeError(Exception):
 
 
 class DelugeClient:
-    def __init__(self, host: str, port: int = 8112, password: str = "",
-                 use_https: bool = False, verify_tls: bool = False, timeout: int = 20):
-        self.host = host
-        self.port = int(port)
+    def __init__(self, base_url: str, password: str = "",
+                 verify_tls: bool = False, timeout: int = 20):
+        self.base_url = (base_url or "").strip()
+        if self.base_url and "://" not in self.base_url:
+            self.base_url = "http://" + self.base_url
         self.password = password
-        self.scheme = "https" if use_https else "http"
         self.verify_tls = verify_tls
         self.timeout = int(timeout)
         self._id = 0
 
+        scheme = (urlparse(self.base_url).scheme or "http").lower()
         handlers = [urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())]
-        if use_https:
+        if scheme == "https":
             ctx = ssl.create_default_context()
             if not verify_tls:
                 ctx.check_hostname = False
@@ -45,7 +52,7 @@ class DelugeClient:
 
     @property
     def _url(self) -> str:
-        return f"{self.scheme}://{self.host}:{self.port}/json"
+        return self.base_url.rstrip("/") + "/json"
 
     def _call(self, method: str, params=None):
         self._id += 1

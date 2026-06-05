@@ -103,8 +103,15 @@ FTP is available but sends your password in the clear and should be avoided.
 
 If your files come from torrents, Trawl can ask Deluge whether a torrent has
 actually finished before pulling its files. Enable it under **Settings →
-Deluge completion check**, enter your Deluge **Web UI** host/IP (default port
-**8112**) and the Web UI password, and click **Test Deluge**.
+Deluge completion check**, paste your Deluge **Web UI URL** and the Web UI
+password, and click **Test Deluge**.
+
+The URL is simply whatever you open the Deluge Web UI at in a browser. That
+covers a seedbox serving Deluge over HTTPS behind a reverse proxy at a subpath,
+e.g. `https://you.example.com/deluge/`, as well as a plain local install like
+`http://10.0.0.50:8112`. Leave **Verify TLS certificate** off if needed (it's
+fine either way for a host with a valid certificate). If the URL uses a
+self-hosted certificate, keep it off.
 
 When enabled, before each sync Trawl fetches the list of torrents and their
 state, and skips any file whose torrent is still downloading (matched by the
@@ -114,7 +121,8 @@ reached, Trawl logs a warning and falls back to the minimum-file-age check
 rather than halting, so a Deluge outage never stops syncing.
 
 This talks to the Deluge **Web UI** (deluge-web), the same thing you log into in
-a browser - not the raw daemon on port 58846.
+a browser - not the raw daemon on port 58846, so make sure the Web UI is
+running.
 
 ## Automatic updates
 

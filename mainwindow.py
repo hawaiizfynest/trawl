@@ -367,10 +367,9 @@ class MainWindow(QMainWindow):
         df = QFormLayout(dbox)
         df.setSpacing(10)
         self.chk_deluge = QCheckBox("Only sync files whose torrent has finished in Deluge")
-        self.in_deluge_host = QLineEdit()
-        self.in_deluge_host.setPlaceholderText("Deluge Web UI host or IP, e.g. 10.0.0.50")
-        self.in_deluge_port = QSpinBox()
-        self.in_deluge_port.setRange(1, 65535)
+        self.in_deluge_url = QLineEdit()
+        self.in_deluge_url.setPlaceholderText("https://you.example.com/deluge/   or   http://10.0.0.50:8112")
+        self.in_deluge_url.setToolTip("The exact address you open the Deluge Web UI at in a browser.")
         self.in_deluge_pass = QLineEdit()
         self.in_deluge_pass.setEchoMode(QLineEdit.EchoMode.Password)
         self.btn_deluge_showpass = QPushButton("Show")
@@ -382,15 +381,12 @@ class MainWindow(QMainWindow):
         dpass_row.addWidget(self.btn_deluge_showpass)
         dpass_wrap = QWidget()
         dpass_wrap.setLayout(dpass_row)
-        self.chk_deluge_https = QCheckBox("Use HTTPS")
         self.chk_deluge_verify = QCheckBox("Verify TLS certificate")
         self.btn_deluge_test = QPushButton("Test Deluge")
         self.btn_deluge_test.clicked.connect(self.test_deluge)
         df.addRow("", self.chk_deluge)
-        df.addRow("Host", self.in_deluge_host)
-        df.addRow("Web UI port", self.in_deluge_port)
+        df.addRow("Web UI URL", self.in_deluge_url)
         df.addRow("Web UI password", dpass_wrap)
-        df.addRow("", self.chk_deluge_https)
         df.addRow("", self.chk_deluge_verify)
         df.addRow("", self.btn_deluge_test)
         outer.addWidget(dbox)
@@ -513,10 +509,8 @@ class MainWindow(QMainWindow):
         self.chk_delete.setChecked(c.delete_remote_after)
 
         self.chk_deluge.setChecked(c.deluge_enabled)
-        self.in_deluge_host.setText(c.deluge_host)
-        self.in_deluge_port.setValue(c.deluge_port)
+        self.in_deluge_url.setText(c.deluge_url)
         self.in_deluge_pass.setText(c.get_deluge_password())
-        self.chk_deluge_https.setChecked(c.deluge_https)
         self.chk_deluge_verify.setChecked(c.deluge_verify_tls)
 
         self.in_token.setText(c.get_github_token())
@@ -552,9 +546,7 @@ class MainWindow(QMainWindow):
         c.run_on_startup = self.chk_startup.isChecked()
 
         c.deluge_enabled = self.chk_deluge.isChecked()
-        c.deluge_host = self.in_deluge_host.text().strip()
-        c.deluge_port = self.in_deluge_port.value()
-        c.deluge_https = self.chk_deluge_https.isChecked()
+        c.deluge_url = self.in_deluge_url.text().strip()
         c.deluge_verify_tls = self.chk_deluge_verify.isChecked()
 
         c.check_updates_on_launch = self.chk_update_launch.isChecked()
@@ -825,8 +817,8 @@ class MainWindow(QMainWindow):
             return
         self._gather_into_config()
         self.cfg.set_deluge_password(self.in_deluge_pass.text())
-        if not self.cfg.deluge_host:
-            QMessageBox.warning(self, "Trawl", "Enter the Deluge Web UI host first.")
+        if not self.cfg.deluge_url:
+            QMessageBox.warning(self, "Trawl", "Enter the Deluge Web UI URL first.")
             return
         self.btn_deluge_test.setEnabled(False)
         self.btn_deluge_test.setText("Testing...")

@@ -76,11 +76,15 @@ Decided up front with the user:
   serially via queued signals, so the connection is never used from two threads.
   Picked files download (flattened) into `local_dir` and are recorded in the DB.
   After an aborted transfer the session reconnects (unless it is closing).
-- `deluge.py` - `DelugeClient`, a Deluge **Web UI** JSON-RPC client (default port
-  8112, stdlib urllib + cookiejar, no extra deps). `login()` authenticates and
-  attaches to a daemon; `get_torrents()` returns name/progress/state/is_finished;
-  `incomplete_names()` is the set of unfinished torrent names. A torrent counts
-  as complete if `is_finished`, `progress >= 100`, or `state == "Seeding"`.
+- `deluge.py` - `DelugeClient`, a Deluge **Web UI** JSON-RPC client (stdlib
+  urllib + cookiejar, no extra deps). Configured with the full Web UI **URL**, so
+  it handles seedboxes that serve Deluge over HTTPS behind a reverse proxy at a
+  subpath (e.g. `https://you.example.com/deluge/`) as well as a plain local
+  install (`http://10.0.0.50:8112`); the JSON endpoint is the URL + `/json`.
+  `login()` authenticates and attaches to a daemon; `get_torrents()` returns
+  name/progress/state/is_finished; `incomplete_names()` is the set of unfinished
+  torrent names. Complete = `is_finished`, `progress >= 100`, or `state ==
+  "Seeding"`.
 - `updater.py` - GitHub-release self-update. `UpdateChecker` reads
   `releases/latest`; `UpdateDownloader` pulls the `Trawl.exe` asset via the asset
   API url with `Accept: application/octet-stream` (with a redirect handler that
@@ -89,7 +93,7 @@ Decided up front with the user:
   from keyring. `apply_update_and_restart()` writes a detached batch that waits
   on this PID, deletes the old exe, moves the new one in and relaunches - frozen
   Windows only.
-- `version.py` - `__version__` (currently `1.1.0`). Bump and tag to release.
+- `version.py` - `__version__` (currently `1.1.1`). Bump and tag to release.
 - `mainwindow.py` - `MainWindow` + `DARK_QSS`. Four tabs (Dashboard, Connection,
   Settings, Log), system tray, repeating `QTimer` scheduler + 1 Hz countdown
   label. The Settings tab is wrapped in a `QScrollArea` and now also has the
@@ -115,13 +119,14 @@ Sync: `remote_dir, local_dir, recursive, preserve_structure,
 min_file_age_minutes, interval_hours, delete_remote_after`.
 Behaviour: `schedule_enabled, autosync_on_launch, minimize_to_tray,
 start_minimized, run_on_startup, notify_on_complete`.
-Deluge: `deluge_enabled, deluge_host, deluge_port (8112), deluge_https,
-deluge_verify_tls` + Deluge Web UI password in keyring (`deluge:host:port`).
+Deluge: `deluge_enabled, deluge_url, deluge_verify_tls` + Deluge Web UI password
+in keyring (account `deluge`). The URL is the full Web UI address (handles
+HTTPS + reverse-proxy subpaths and custom ports).
 Updates: `check_updates_on_launch` + GitHub token in keyring (`github_token`).
 
 ## Status
 
-**v1.1.0.** Adds self-update, the Deluge completion check, and a browser/sync
+**v1.1.1.** Adds self-update, the Deluge completion check, and a browser/sync
 fix so symlinked files show and download. All modules compile; the FTP
 parsing/path/dedup, version-compare, Deluge completion and name-matching logic
 are unit-tested; the full `MainWindow` (with the new Deluge + Updates UI and the

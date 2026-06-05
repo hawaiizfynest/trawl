@@ -82,8 +82,7 @@ class DelugeTestWorker(QObject):
     def run(self) -> None:
         try:
             client = DelugeClient(
-                self.cfg.deluge_host, self.cfg.deluge_port,
-                self.cfg.get_deluge_password(), self.cfg.deluge_https,
+                self.cfg.deluge_url, self.cfg.get_deluge_password(),
                 self.cfg.deluge_verify_tls)
             client.login()
             torrents = client.get_torrents()
@@ -114,12 +113,11 @@ class SyncWorker(QObject):
     def _deluge_incomplete(self):
         """Set of lowercased torrent names that are NOT finished, or None to
         skip Deluge gating (disabled, or the check failed)."""
-        if not self.cfg.deluge_enabled or not self.cfg.deluge_host:
+        if not self.cfg.deluge_enabled or not self.cfg.deluge_url:
             return None
         try:
             client = DelugeClient(
-                self.cfg.deluge_host, self.cfg.deluge_port,
-                self.cfg.get_deluge_password(), self.cfg.deluge_https,
+                self.cfg.deluge_url, self.cfg.get_deluge_password(),
                 self.cfg.deluge_verify_tls)
             client.login()
             names = {n.lower() for n in client.incomplete_names()}
