@@ -126,12 +126,17 @@ running.
 
 ## Automatic updates
 
-Trawl can update itself from the latest GitHub release. Under **Settings →
+Trawl can update itself from your GitHub releases. Under **Settings →
 Updates** you'll see the current version, an optional GitHub token field, a
 **Check for updates when Trawl starts** toggle, and a **Check for updates now**
-button. When a newer release is found, Trawl offers to update; if you accept, it
-downloads the new `Trawl.exe`, then closes, swaps itself out for the new build
-and relaunches.
+button. It looks at the **most recently published release** (by date, not by
+version number) that has a `Trawl.exe` attached, and if that release's tag
+differs from the version you're running, it offers to update. Accept and it
+downloads the new `Trawl.exe`, then closes, swaps itself out and relaunches.
+
+Because it compares release dates, version numbers don't have to keep going up -
+whatever you published last is what gets offered. (Keeping them increasing still
+makes the version label easier to read.)
 
 Because the release is on a public repo, no token is needed. The token field is
 only there if you make the repo private again, or if the unauthenticated GitHub
