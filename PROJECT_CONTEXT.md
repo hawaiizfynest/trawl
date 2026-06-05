@@ -104,6 +104,7 @@ Decided up front with the user:
   drops the auth header on the storage redirect). Token is **optional** (only
   needed for a private repo or to dodge the unauthenticated rate limit) and comes
   from keyring. Downloads land in `%TEMP%` (always writable, dodges Controlled Folder Access); `apply_update_and_restart()` writes a detached batch that waits
+  The relaunch batch was hardened in v1.1.9: ping-based delays (timeout is a no-op in a console-less detached process), the old exe is renamed aside rather than deleted (Windows allows renaming a running exe), a safe fallback relaunches whatever exe exists, and every step is logged to %APPDATA%\\Trawl\\logs\\update.log. `cleanup_stale_update()` runs at startup to remove a leftover '<exe>.old'.
   on this PID, deletes the old exe, moves the new one in and relaunches - frozen
   Windows only.
 - `version.py` - `__version__` (currently `1.1.2`). Bump and tag to release.

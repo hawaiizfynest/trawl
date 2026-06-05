@@ -192,35 +192,84 @@ class UpdateDownloader(QObject):
 def apply_update_and_restart(new_exe: str) -> bool:
     """Windows + frozen only. Spawns a detached batch that waits for this
     process to exit, swaps the exe and relaunches. Returns False if it cannot
-    run (e.g. launched from source), so the caller can fall back gracefully."""
+    run (e.g. launched from source), so the caller can fall back gracefully.
+
+    Robustness notes:
+      * Delays use ping, not timeout: a detached process has no console, and
+        timeout aborts instantly there, so any timeout-based wait is a no-op.
+      * The old exe is renamed aside (not deleted) before the new one is moved
+        into place. Windows allows renaming a running/locked .exe but not
+        deleting it, so the swap works even while the one-file bootloader is
+        still releasing the old file.
+      * If anything fails the script relaunches whatever exe is present, so the
+        app is never left uninstalled.
+      * Every step is logged to %APPDATA%\\Trawl\\logs\\update.log.
+    """
     if not is_frozen() or not sys.platform.startswith("win"):
         return False
     current = sys.executable
     pid = os.getpid()
+    appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+    log_dir = os.path.join(appdata, "Trawl", "logs")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        pass
+    log_path = os.path.join(log_dir, "update.log")
     bat = os.path.join(tempfile.gettempdir(), "trawl_update.bat")
     script = f"""@echo off
-setlocal
+setlocal enableextensions
 set "PID={pid}"
 set "OLD={current}"
 set "NEW={new_exe}"
+set "LOG={log_path}"
+for %%I in ("%OLD%") do set "OLDDIR=%%~dpI"
+> "%LOG%" echo [update] start pid=%PID%
+>> "%LOG%" echo [update] OLD=%OLD%
+>> "%LOG%" echo [update] NEW=%NEW%
+
+set /a w=0
 :wait
 tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >NUL
-    goto wait
-)
-set /a tries=0
-:retry
-del "%OLD%" >NUL 2>&1
-if exist "%OLD%" (
-    set /a tries+=1
-    if %tries% lss 20 (
-        timeout /t 1 /nobreak >NUL
-        goto retry
-    )
-)
-move /Y "%NEW%" "%OLD%" >NUL
-start "" "%OLD%"
+if errorlevel 1 goto gone
+set /a w+=1
+if %w% geq 30 goto gone
+ping -n 2 127.0.0.1 >NUL
+goto wait
+:gone
+>> "%LOG%" echo [update] app exited (waited ~%w%s); settling
+ping -n 3 127.0.0.1 >NUL
+
+if exist "%OLD%.old" del "%OLD%.old" >NUL 2>&1
+set /a r=0
+:rename
+move /Y "%OLD%" "%OLD%.old" >> "%LOG%" 2>&1
+if not exist "%OLD%" goto renamed
+set /a r+=1
+if %r% geq 15 goto renamefail
+ping -n 2 127.0.0.1 >NUL
+goto rename
+
+:renamefail
+>> "%LOG%" echo [update] ERROR could not move old exe aside; relaunching existing
+start "" /D "%OLDDIR%" "%OLD%"
+goto cleanup
+
+:renamed
+>> "%LOG%" echo [update] old exe moved aside
+move /Y "%NEW%" "%OLD%" >> "%LOG%" 2>&1
+if exist "%OLD%" goto launch
+>> "%LOG%" echo [update] ERROR new exe not in place; restoring previous
+move /Y "%OLD%.old" "%OLD%" >> "%LOG%" 2>&1
+
+:launch
+>> "%LOG%" echo [update] launching %OLD%
+start "" /D "%OLDDIR%" "%OLD%"
+
+:cleanup
+ping -n 2 127.0.0.1 >NUL
+del "%OLD%.old" >NUL 2>&1
+>> "%LOG%" echo [update] done
 del "%~f0" >NUL 2>&1
 """
     with open(bat, "w", encoding="utf-8") as f:
@@ -235,3 +284,16 @@ del "%~f0" >NUL 2>&1
         close_fds=True,
     )
     return True
+
+
+def cleanup_stale_update() -> None:
+    """Delete a leftover '<exe>.old' left by a previous self-update. Safe to
+    call at startup; by then the old image is fully unlocked. Ignores errors."""
+    try:
+        if not is_frozen() or not sys.platform.startswith("win"):
+            return
+        old = sys.executable + ".old"
+        if os.path.exists(old):
+            os.remove(old)
+    except Exception:
+        pass

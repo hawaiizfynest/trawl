@@ -28,6 +28,7 @@ from database import Database
 from remotebrowser import RemoteBrowserDialog
 from updater import (
     UpdateChecker, UpdateDownloader, apply_update_and_restart, current_version,
+    cleanup_stale_update,
     is_frozen,
 )
 from worker import DelugeTestWorker, SyncWorker, TestWorker, human_size
@@ -112,6 +113,9 @@ class MainWindow(QMainWindow):
         self._really_quit = False
         self._browser_open = False
         self.next_run = None
+
+        # Remove any '<exe>.old' left behind by a previous self-update.
+        cleanup_stale_update()
 
         self.setWindowTitle(f"Trawl {current_version()}")
         self.resize(880, 660)
