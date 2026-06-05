@@ -102,7 +102,8 @@ FTP is available but sends your password in the clear and should be avoided.
 For FTPS, Trawl reuses the login's TLS session on the data connection and
 tolerates servers that close that connection without a clean TLS shutdown -
 this resolves the common seedbox transfer error "EOF occurred in violation of
-protocol".
+protocol". It also pins TLS 1.2, which avoids data-channel errors such as
+"BAD_LENGTH" that some servers throw under TLS 1.3.
 
 ## Deluge completion check (optional)
 

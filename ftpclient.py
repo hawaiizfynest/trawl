@@ -99,6 +99,13 @@ class FtpClient:
     # ---- TLS context ----
     def _ssl_context(self) -> ssl.SSLContext:
         ctx = ssl.create_default_context()
+        # Pin to TLS 1.2. Many FTPS servers mishandle TLS 1.3 on the data
+        # connection, which shows up as 'BAD_LENGTH' or other SSL record errors
+        # mid-transfer. TLS 1.2 session reuse is the reliable FTPS combination.
+        try:
+            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        except (ValueError, AttributeError):
+            pass
         if not self.verify_tls:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE

@@ -55,7 +55,9 @@ Decided up front with the user:
 - `ftpclient.py` - `FtpClient` and `RemoteFile`. `connect()` handles all three
   modes (via `_ReuseFTP_TLS` / `_ImplicitReuseFTP_TLS`, which reuse the control
   TLS session on the data connection - required by most seedboxes and the fix for
-  'EOF occurred in violation of protocol'), honours `verify_tls` (default False -> `CERT_NONE`, since seedbox
+  'EOF occurred in violation of protocol'; the SSL context is also pinned to TLS
+  1.2 to avoid data-channel 'BAD_LENGTH'/record errors some servers throw under
+  TLS 1.3), honours `verify_tls` (default False -> `CERT_NONE`, since seedbox
   certs are usually self-signed). `walk(root, recursive)` uses **MLSD** first
   (reliable type/size/modify), falling back to a tolerant Unix **LIST** parser
   (`_LIST_RE`). `download()` resumes via `.part` + FTP `REST`, falls back to a
