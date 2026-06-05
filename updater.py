@@ -28,7 +28,7 @@ from version import __version__
 
 GITHUB_OWNER = "HawaiizFynest"
 GITHUB_REPO = "Trawl"
-API_RELEASES = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page=50"
+API_LATEST = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 ASSET_NAME = "Trawl.exe"
 
 
@@ -96,39 +96,18 @@ class UpdateChecker(QObject):
     def run(self) -> None:
         try:
             req = urllib.request.Request(
-                API_RELEASES, headers=_auth_headers(self.token, "application/vnd.github+json"))
+                API_LATEST, headers=_auth_headers(self.token, "application/vnd.github+json"))
             with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as resp:
-                releases = json.loads(resp.read().decode("utf-8"))
-
-            candidates = []
-            for rel in releases or []:
-                if rel.get("draft"):
-                    continue
-                asset_url = ""
-                for asset in rel.get("assets", []) or []:
-                    if (asset.get("name", "") or "").lower() == ASSET_NAME.lower():
-                        asset_url = asset.get("url", "")  # API url (works for private repos)
-                        break
-                if not asset_url:
-                    continue  # nothing to install from this release
-                candidates.append({
-                    "tag": (rel.get("tag_name", "") or "").lstrip("vV"),
-                    "when": rel.get("published_at") or rel.get("created_at") or "",
-                    "url": asset_url,
-                    "notes": rel.get("body", "") or "",
-                })
-
-            if not candidates:
-                self.result.emit(False, current_version(), "", "")
-                return
-
-            # Choose the most recently published release, not the highest version
-            # number (ISO 8601 timestamps sort chronologically as strings).
-            candidates.sort(key=lambda c: c["when"], reverse=True)
-            newest = candidates[0]
-            running = current_version().lstrip("vV").strip().lower()
-            available = newest["tag"].strip().lower() != running
-            self.result.emit(available, newest["tag"], newest["url"], newest["notes"])
+                data = json.loads(resp.read().decode("utf-8"))
+            tag = data.get("tag_name", "") or ""
+            notes = data.get("body", "") or ""
+            asset_url = ""
+            for asset in data.get("assets", []) or []:
+                if (asset.get("name", "") or "").lower() == ASSET_NAME.lower():
+                    asset_url = asset.get("url", "")  # API url (works for private repos)
+                    break
+            available = bool(asset_url) and is_newer(tag, __version__)
+            self.result.emit(available, tag.lstrip("vV"), asset_url, notes)
         except Exception as e:
             self.error.emit(self._friendly(e))
 

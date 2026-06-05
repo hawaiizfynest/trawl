@@ -85,18 +85,15 @@ Decided up front with the user:
   name/progress/state/is_finished; `incomplete_names()` is the set of unfinished
   torrent names. Complete = `is_finished`, `progress >= 100`, or `state ==
   "Seeding"`.
-- `updater.py` - GitHub-release self-update. `UpdateChecker` reads the
-  releases list and offers the **most recently published** release (by date, not
-  version number) whose tag differs from the running version - this is why a
-  release labelled with a lower number than the running build is still offered.
-  `UpdateDownloader` pulls the `Trawl.exe` asset via the asset
+- `updater.py` - GitHub-release self-update. `UpdateChecker` reads
+  `releases/latest`; `UpdateDownloader` pulls the `Trawl.exe` asset via the asset
   API url with `Accept: application/octet-stream` (with a redirect handler that
   drops the auth header on the storage redirect). Token is **optional** (only
   needed for a private repo or to dodge the unauthenticated rate limit) and comes
   from keyring. `apply_update_and_restart()` writes a detached batch that waits
   on this PID, deletes the old exe, moves the new one in and relaunches - frozen
   Windows only.
-- `version.py` - `__version__` (currently `1.1.2`). Bump and tag to release.
+- `version.py` - `__version__` (currently `1.1.1`). Bump and tag to release.
 - `mainwindow.py` - `MainWindow` + `DARK_QSS`. Four tabs (Dashboard, Connection,
   Settings, Log), system tray, repeating `QTimer` scheduler + 1 Hz countdown
   label. The Settings tab is wrapped in a `QScrollArea` and now also has the
@@ -129,7 +126,7 @@ Updates: `check_updates_on_launch` + GitHub token in keyring (`github_token`).
 
 ## Status
 
-**v1.1.2.** Adds self-update, the Deluge completion check, and a browser/sync
+**v1.1.1.** Adds self-update, the Deluge completion check, and a browser/sync
 fix so symlinked files show and download. All modules compile; the FTP
 parsing/path/dedup, version-compare, Deluge completion and name-matching logic
 are unit-tested; the full `MainWindow` (with the new Deluge + Updates UI and the
