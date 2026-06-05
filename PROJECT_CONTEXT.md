@@ -53,14 +53,20 @@ Decided up front with the user:
   modify_epoch, local_path, status, updated_at)`. `is_completed(path, size)` is
   the dedup check (path present, status='completed', size matches).
 - `ftpclient.py` - `FtpClient` and `RemoteFile`. `connect()` handles all three
-  modes and honours `verify_tls` (default False -> `CERT_NONE`, since seedbox
+  modes (via `_ReuseFTP_TLS` / `_ImplicitReuseFTP_TLS`, which reuse the control
+  TLS session on the data connection - required by most seedboxes and the fix for
+  'EOF occurred in violation of protocol'), honours `verify_tls` (default False -> `CERT_NONE`, since seedbox
   certs are usually self-signed). `walk(root, recursive)` uses **MLSD** first
   (reliable type/size/modify), falling back to a tolerant Unix **LIST** parser
   (`_LIST_RE`). `download()` resumes via `.part` + FTP `REST`, falls back to a
   clean restart if `REST` is refused, verifies final size, then renames. Returns
   `(status, detail)` where status is `completed` / `stopped` / `size_mismatch` /
   `write_error` (local permission/disk, e.g. Controlled Folder Access) / `error`
-  (server) - detail carries the real message so failures are diagnosable. `list_dir_entries(path)`
+  (server) - detail carries the real message so failures are diagnosable. Transfers go
+  through `_retrieve`, a recv loop that tolerates an unclean TLS close at
+  end-of-stream (integrity is checked via the expected size). SSL/socket errors
+  are classified as `error` (not `write_error`) since `ssl.SSLError` is itself an
+  `OSError`; genuine local write failures are tagged via `_LocalWriteError`. `list_dir_entries(path)`
   gives a non-recursive `(name, is_dir, size)` listing for the browser. Both the
   walk and the browser listing treat **symlinks (and unknown types) as files**,
   not skipped - seedboxes often expose completed downloads as symlinks, and RETR

@@ -99,6 +99,11 @@ certificate is self-signed (very common), leave **Verify TLS certificate**
 unchecked. Turn it on only if the provider has a valid public certificate. Plain
 FTP is available but sends your password in the clear and should be avoided.
 
+For FTPS, Trawl reuses the login's TLS session on the data connection and
+tolerates servers that close that connection without a clean TLS shutdown -
+this resolves the common seedbox transfer error "EOF occurred in violation of
+protocol".
+
 ## Deluge completion check (optional)
 
 If your files come from torrents, Trawl can ask Deluge whether a torrent has

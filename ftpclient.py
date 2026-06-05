@@ -30,9 +30,34 @@ class RemoteFile:
     modify_epoch: Optional[int]
 
 
-class _ImplicitFTP_TLS(ftplib.FTP_TLS):
-    """FTP_TLS variant that wraps the control socket in TLS immediately
-    (implicit FTPS, typically port 990)."""
+class _LocalWriteError(Exception):
+    """Wraps a local filesystem error so it can be told apart from a transfer
+    error (both surface as OSError otherwise)."""
+    def __init__(self, original: Exception):
+        super().__init__(str(original))
+        self.original = original
+
+
+class _ReuseFTP_TLS(ftplib.FTP_TLS):
+    """FTP_TLS that reuses the control connection's TLS session on the data
+    connection. Many FTPS servers (and most seedboxes) require this, and it is
+    the usual fix for 'EOF occurred in violation of protocol' during transfers."""
+
+    def ntransfercmd(self, cmd, rest=None):
+        conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+        if self._prot_p:
+            try:
+                session = self.sock.session
+            except AttributeError:
+                session = None
+            conn = self.context.wrap_socket(
+                conn, server_hostname=self.host, session=session)
+        return conn, size
+
+
+class _ImplicitReuseFTP_TLS(_ReuseFTP_TLS):
+    """Implicit FTPS (TLS from the first byte, typically port 990) with the same
+    data-channel session reuse."""
 
     def __init__(self, *args, **kwargs):
         self._wrapped_sock = None
@@ -47,6 +72,7 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
         if value is not None and not isinstance(value, ssl.SSLSocket):
             value = self.context.wrap_socket(value, server_hostname=self.host)
         self._wrapped_sock = value
+
 
 
 # Tolerant Unix LIST parser used only when the server does not support MLSD.
@@ -85,12 +111,12 @@ class FtpClient:
             ftp.connect(self.host, self.port or 21)
             ftp.login(self.username, self.password)
         elif self.mode == "ftps_implicit":
-            ftp = _ImplicitFTP_TLS(context=self._ssl_context(), timeout=self.timeout)
+            ftp = _ImplicitReuseFTP_TLS(context=self._ssl_context(), timeout=self.timeout)
             ftp.connect(self.host, self.port or 990)
             ftp.login(self.username, self.password)
             ftp.prot_p()
         else:  # ftps_explicit (default)
-            ftp = ftplib.FTP_TLS(context=self._ssl_context(), timeout=self.timeout)
+            ftp = _ReuseFTP_TLS(context=self._ssl_context(), timeout=self.timeout)
             ftp.connect(self.host, self.port or 21)
             ftp.auth()
             ftp.login(self.username, self.password)
@@ -206,6 +232,37 @@ class FtpClient:
                     yield RemoteFile(full, size, self._parse_modify(facts))
 
     # ---- download ----
+    def _retrieve(self, cmd: str, callback, rest, should_stop) -> None:
+        """RETR over the data connection, tolerating servers that close the TLS
+        data channel without a clean shutdown (the cause of
+        'EOF occurred in violation of protocol'). Integrity is verified by the
+        caller via the expected file size."""
+        conn, _ = self.ftp.ntransfercmd(cmd, rest)
+        try:
+            while True:
+                if should_stop():
+                    raise AbortDownload()
+                try:
+                    data = conn.recv(65536)
+                except ssl.SSLEOFError:
+                    break
+                except ssl.SSLError as e:
+                    if "EOF" in str(e).upper() or "UNEXPECTED" in str(e).upper():
+                        break
+                    raise
+                if not data:
+                    break
+                callback(data)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            self.ftp.voidresp()
+        except ftplib.all_errors:
+            pass
+
     def download(self, rf: RemoteFile, local_path: str,
                  progress_cb: Callable[[int, int], None],
                  should_stop: Callable[[], bool]):
@@ -230,35 +287,41 @@ class FtpClient:
 
         written = [offset]
 
-        def open_and_fetch(start: int, file_mode: str) -> None:
-            with open(part, file_mode) as f:
+        def fetch(start: int, file_mode: str) -> None:
+            try:
+                f = open(part, file_mode)
+            except OSError as e:
+                raise _LocalWriteError(e)
+            try:
                 def cb(data: bytes) -> None:
-                    if should_stop():
-                        raise AbortDownload()
-                    f.write(data)
+                    try:
+                        f.write(data)
+                    except OSError as e:
+                        raise _LocalWriteError(e)
                     written[0] += len(data)
                     progress_cb(written[0], rf.size)
-                rest = start if start > 0 else None
-                self.ftp.retrbinary(f"RETR {rf.path}", cb, blocksize=65536, rest=rest)
+                self._retrieve(f"RETR {rf.path}", cb,
+                               start if start > 0 else None, should_stop)
+            finally:
+                f.close()
 
         try:
             try:
-                open_and_fetch(offset, "ab" if offset else "wb")
+                fetch(offset, "ab" if offset else "wb")
             except (ftplib.error_perm, ftplib.error_temp):
                 # Server likely refused REST/resume - restart from scratch.
                 if offset:
                     offset = 0
                     written[0] = 0
-                    open_and_fetch(0, "wb")
+                    fetch(0, "wb")
                 else:
                     raise
         except AbortDownload:
             return ("stopped", "")
-        except OSError as e:
-            # local file system problems (permission denied, disk full, ...)
-            return ("write_error", str(e))
-        except ftplib.all_errors as e:
-            # server / transfer problems
+        except _LocalWriteError as e:
+            return ("write_error", str(e.original))
+        except (ssl.SSLError, ftplib.Error, OSError, EOFError) as e:
+            # connection / transfer problems (local file errors are tagged above)
             return ("error", str(e))
 
         try:
