@@ -198,6 +198,7 @@ class SyncWorker(QObject):
             self.overall.emit(0, total)
             self.log.emit("info", f"{total} new file(s) to download.")
 
+            reuse_note_shown = False
             for index, rf in enumerate(eligible):
                 if self._stop:
                     self.log.emit("warn", "Stopped by user.")
@@ -233,6 +234,12 @@ class SyncWorker(QObject):
 
                 self.log.emit("info", f"Downloading {name} ({human_size(rf.size)})...")
                 result, detail = client.download(rf, local_path, progress_cb, lambda: self._stop)
+
+                if client._reuse_fell_back and not reuse_note_shown:
+                    reuse_note_shown = True
+                    self.log.emit("info", "Server rejected TLS session reuse on the "
+                                          "data channel; using a full handshake per "
+                                          "transfer instead.")
 
                 if result == "completed":
                     db.record(rf.path, rf.size, rf.modify_epoch, local_path, "completed")
