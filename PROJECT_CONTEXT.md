@@ -171,3 +171,7 @@ actual machine. The repo is now **public**, so updates work without a token.
 - No `GITHUB_SETUP.txt` in the repo or structure listings.
 - Placeholders use `HawaiizFynest`, never `YOUR_USERNAME`.
 - Author credit `Written by LJ "HawaiizFynest" Eblacas` on applicable files.
+
+
+## FTPS download fix (v1.2.0)
+Root cause of the EOF / BAD_LENGTH download failures: `_retrieve` read the RETR data channel with a raw recv loop that ran until the server closed the connection, and vsFTPd closes the encrypted data channel without a clean TLS shutdown - that final read raised the SSL error. It also never sent TYPE I, so transfers ran in ASCII mode. Fix: `_retrieve` now issues `TYPE I` and accepts `expected_remaining`; when the size is known it stops as soon as that many bytes arrive (before the close). Unknown-size reads fall back to read-to-EOF and treat EOF/UNEXPECTED/BAD_LENGTH/SHUTDOWN SSL errors as a normal end of stream. download() still verifies the final byte count (size_mismatch). NOTE: usbx.me requires PROT P (clear data channel returns error_perm 522), so 'Encrypt file transfers' must stay ON.

@@ -251,27 +251,55 @@ class FtpClient:
                     yield RemoteFile(full, size, self._parse_modify(facts))
 
     # ---- download ----
-    def _retrieve(self, cmd: str, callback, rest, should_stop) -> None:
-        """RETR over the data connection, tolerating servers that close the TLS
-        data channel without a clean shutdown (the cause of
-        'EOF occurred in violation of protocol'). Integrity is verified by the
-        caller via the expected file size."""
+    def _retrieve(self, cmd: str, callback, rest, should_stop,
+                  expected_remaining: int = 0) -> None:
+        """RETR over the data connection.
+
+        Reads in binary mode and, when the remaining size is known, stops as
+        soon as that many bytes have arrived - deliberately *before* the
+        server's connection close. Many FTPS servers (vsFTPd among them) close
+        the encrypted data channel without a clean TLS shutdown, and reading
+        into that close is exactly what surfaces as 'EOF occurred in violation
+        of protocol' or '[SSL: BAD_LENGTH] bad length'. Stopping at the known
+        size sidesteps it entirely; download() still verifies the final size.
+        When the size is unknown we read to EOF and treat an unclean TLS close
+        as a normal end of stream.
+        """
+        # Force binary mode: the byte count must match the server-reported size,
+        # and ASCII mode would translate newlines and corrupt binary files.
+        try:
+            self.ftp.voidcmd("TYPE I")
+        except ftplib.all_errors:
+            pass
         conn, _ = self.ftp.ntransfercmd(cmd, rest)
+        received = 0
         try:
             while True:
                 if should_stop():
                     raise AbortDownload()
+                # Got everything we expected -> stop before the server's close.
+                if expected_remaining and received >= expected_remaining:
+                    break
                 try:
                     data = conn.recv(65536)
                 except ssl.SSLEOFError:
                     break
                 except ssl.SSLError as e:
-                    if "EOF" in str(e).upper() or "UNEXPECTED" in str(e).upper():
+                    msg = str(e).upper()
+                    # Unclean TLS shutdown on the data channel shows up as one
+                    # of these. Treat as end-of-stream; size is verified after.
+                    if any(k in msg for k in (
+                            "EOF", "UNEXPECTED", "BAD_LENGTH", "BAD LENGTH",
+                            "SHUTDOWN")):
                         break
                     raise
+                except OSError:
+                    # Plain-socket close mid-read (clear data channel).
+                    break
                 if not data:
                     break
                 callback(data)
+                received += len(data)
         finally:
             try:
                 conn.close()
@@ -320,7 +348,8 @@ class FtpClient:
                     written[0] += len(data)
                     progress_cb(written[0], rf.size)
                 self._retrieve(f"RETR {rf.path}", cb,
-                               start if start > 0 else None, should_stop)
+                               start if start > 0 else None, should_stop,
+                               expected_remaining=(rf.size - start) if rf.size else 0)
             finally:
                 f.close()
 

@@ -105,7 +105,7 @@ this resolves the common seedbox transfer error "EOF occurred in violation of
 protocol". It also pins TLS 1.2, which avoids data-channel errors such as
 "BAD_LENGTH" that some servers throw under TLS 1.3.
 
-If transfers still fail with SSL errors on a stubborn server, turn off **Encrypt file transfers** on the Connection tab. Your login stays encrypted, but the file data transfers over a clear data channel (prot_c), which removes the SSL data-channel errors entirely.
+Trawl reads downloads in binary mode and stops at the exact file size, so it never reads into the unclean TLS close that some FTPS servers (e.g. vsFTPd) perform - the cause of "EOF occurred in violation of protocol" and "BAD_LENGTH". Leave **Encrypt file transfers** on; most seedboxes require it. The toggle only exists for the rare server that allows an unencrypted data channel.
 
 ## Deluge completion check (optional)
 
