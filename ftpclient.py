@@ -53,18 +53,33 @@ class _ReuseFTP_TLS(ftplib.FTP_TLS):
     kinds of server work."""
 
     _reuse_session = False
+    _data_context_factory = None
 
     def ntransfercmd(self, cmd, rest=None):
+        # Stage tagging so a failure can be reported as control-channel vs the
+        # data-connection TLS handshake.
+        self._last_stage = "control channel (PASV/command)"
         conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
         if self._prot_p:
-            session = None
+            self._last_stage = "data TLS handshake"
             if self._reuse_session:
+                ctx = self.context
                 try:
                     session = self.sock.session
                 except AttributeError:
                     session = None
+            else:
+                # Fresh context per data connection: avoids any shared SSL state
+                # from the previous (listing) data connection.
+                ctx = self.context
+                if self._data_context_factory is not None:
+                    try:
+                        ctx = self._data_context_factory()
+                    except Exception:
+                        ctx = self.context
+                session = None
             try:
-                conn = self.context.wrap_socket(
+                conn = ctx.wrap_socket(
                     conn, server_hostname=self.host, session=session)
             except (ssl.SSLError, OSError):
                 # Leave the control channel readable for the caller's retry.
@@ -166,6 +181,13 @@ class FtpClient:
             else:
                 ftp.prot_c()
         ftp.set_pasv(self.passive)
+        # Give the data connections a way to build their own fresh TLS context
+        # (used when not reusing the control session), so the listing's data
+        # connection cannot leave shared SSL state that breaks the next one.
+        try:
+            ftp._data_context_factory = self._ssl_context
+        except Exception:
+            pass
         self.ftp = ftp
         try:
             return ftp.getwelcome() or "Connected."
@@ -318,11 +340,13 @@ class FtpClient:
                 try:
                     conn, _ = self.ftp.ntransfercmd(cmd, rest)
                 except (ssl.SSLError, OSError) as e2:
+                    stage = getattr(self.ftp, "_last_stage", "?")
                     raise _XferError(
-                        f"data-channel setup failed (both with and without "
+                        f"setup failed at {stage} (tried both with and without "
                         f"session reuse): {e2}") from e2
             else:
-                raise _XferError(f"data-channel setup failed: {e}") from e
+                stage = getattr(self.ftp, "_last_stage", "?")
+                raise _XferError(f"setup failed at {stage}: {e}") from e
         received = 0
         try:
             while True:
