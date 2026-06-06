@@ -39,6 +39,17 @@ def _sanitize_component(name: str) -> str:
     return cleaned or "_"
 
 
+def _is_connection_error(detail: str) -> bool:
+    """True when a download error looks like a transport/TLS/connection failure
+    that a fresh reconnect could clear (as opposed to a write error etc.)."""
+    d = (detail or "").lower()
+    return any(k in d for k in (
+        "ssl", "bad_length", "bad length", "eof", "setup failed",
+        "control channel", "data tls", "handshake", "broken pipe",
+        "reset", "timed out", "timeout", "connection", "wrong_version",
+        "unexpected"))
+
+
 def _client_from_config(cfg: Config) -> FtpClient:
     return FtpClient(
         host=cfg.host, port=cfg.port, username=cfg.username,
@@ -198,6 +209,24 @@ class SyncWorker(QObject):
             self.overall.emit(0, total)
             self.log.emit("info", f"{total} new file(s) to download.")
 
+            # Use a fresh control connection for the download phase. On some
+            # FTPS servers the command channel is left in a bad state after
+            # directory listings (RETR then fails with an SSL error on the
+            # control channel even though the listing worked). A new login is
+            # always clean.
+            if eligible:
+                try:
+                    client.quit()
+                except Exception:
+                    pass
+                client._reuse_retry_done = False
+                client._reuse_fell_back = False
+                try:
+                    client.connect()
+                except Exception as e:
+                    self.log.emit("error", f"Could not reconnect for downloads: {e}")
+                    raise
+
             reuse_note_shown = False
             for index, rf in enumerate(eligible):
                 if self._stop:
@@ -234,6 +263,23 @@ class SyncWorker(QObject):
 
                 self.log.emit("info", f"Downloading {name} ({human_size(rf.size)})...")
                 result, detail = client.download(rf, local_path, progress_cb, lambda: self._stop)
+
+                # If the command channel went bad mid-session, a fresh login is
+                # clean - reconnect and retry this file once.
+                if result == "error" and not self._stop and _is_connection_error(detail):
+                    self.log.emit("warn", f"Connection error ({detail}); reconnecting "
+                                          f"and retrying {name}...")
+                    try:
+                        client.quit()
+                    except Exception:
+                        pass
+                    client._reuse_retry_done = False
+                    try:
+                        client.connect()
+                        result, detail = client.download(
+                            rf, local_path, progress_cb, lambda: self._stop)
+                    except Exception as e:
+                        result, detail = "error", f"reconnect failed: {e}"
 
                 if client._reuse_fell_back and not reuse_note_shown:
                     reuse_note_shown = True
