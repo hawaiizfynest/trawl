@@ -99,13 +99,22 @@ certificate is self-signed (very common), leave **Verify TLS certificate**
 unchecked. Turn it on only if the provider has a valid public certificate. Plain
 FTP is available but sends your password in the clear and should be avoided.
 
-For FTPS, Trawl reuses the login's TLS session on the data connection and
-tolerates servers that close that connection without a clean TLS shutdown -
-this resolves the common seedbox transfer error "EOF occurred in violation of
-protocol". It also pins TLS 1.2, which avoids data-channel errors such as
-"BAD_LENGTH" that some servers throw under TLS 1.3.
+For FTPS, Trawl handles the quirks of real seedbox servers automatically:
 
-Trawl reads downloads in binary mode and stops at the exact file size, so it never reads into the unclean TLS close that some FTPS servers (e.g. vsFTPd) perform - the cause of "EOF occurred in violation of protocol" and "BAD_LENGTH". Leave **Encrypt file transfers** on; most seedboxes require it. The toggle only exists for the rare server that allows an unencrypted data channel.
+- It reads downloads in binary mode and stops at the exact file size, so it
+  never reads into the unclean TLS close that some servers (e.g. vsFTPd) perform
+  - the cause of "EOF occurred in violation of protocol" and "BAD_LENGTH".
+- Each data connection uses its own fresh TLS handshake (no session reuse by
+  default, which some servers mishandle); it will switch to session reuse on its
+  own if a server requires it.
+- If a server's command channel goes bad mid-session (it works for the directory
+  listing, then errors on the download), Trawl reconnects automatically and
+  retries, so transfers still go through. You may see a brief "reconnecting"
+  note in the log - that's normal.
+
+Leave **Encrypt file transfers** on; most seedboxes require it (some reject an
+unencrypted data channel outright). The toggle only exists for the rare server
+that allows clear-text data transfers.
 
 ## Deluge completion check (optional)
 

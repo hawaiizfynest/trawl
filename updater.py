@@ -20,6 +20,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -162,31 +163,66 @@ class UpdateDownloader(QObject):
 
     @pyqtSlot()
     def run(self) -> None:
+        # Download to the temp dir (always writable, not subject to Controlled
+        # Folder Access); the swap step moves it into place. A truncated download
+        # is the usual cause of the relaunched one-file exe failing with "failed
+        # to load python DLL ...python312.dll" (the bundled archive lives at the
+        # end of the file), so verify completeness and retry a few times.
+        new_path = os.path.join(tempfile.gettempdir(), "Trawl.new.exe")
+        last_err = ""
+        for attempt in range(3):
+            if self._stop:
+                self.finished.emit(False, "Cancelled.")
+                return
+            ok, err = self._download_once(new_path)
+            if ok:
+                self.finished.emit(True, new_path)
+                return
+            last_err = err
+            if "Cancelled" in err:
+                self.finished.emit(False, err)
+                return
+            time.sleep(1.5)  # brief pause before retrying a failed download
         try:
-            # Download to the temp dir, which is always writable and not subject
-            # to Controlled Folder Access; the swap step moves it into place.
-            new_path = os.path.join(tempfile.gettempdir(), "Trawl.new.exe")
+            os.remove(new_path)
+        except OSError:
+            pass
+        self.finished.emit(False, last_err or "Download failed after 3 attempts.")
+
+    def _download_once(self, new_path: str) -> tuple:
+        """Download once and verify it. Returns (ok, error_message)."""
+        try:
             opener = urllib.request.build_opener(_StripAuthOnRedirect)
             req = urllib.request.Request(
                 self.asset_api_url,
                 headers=_auth_headers(self.token, "application/octet-stream"))
-            with opener.open(req, timeout=120) as resp:
+            with opener.open(req, timeout=300) as resp:
                 total = int(resp.headers.get("Content-Length") or 0)
                 done = 0
                 with open(new_path, "wb") as f:
                     while True:
                         if self._stop:
-                            self.finished.emit(False, "Cancelled.")
-                            return
+                            return False, "Cancelled."
                         chunk = resp.read(65536)
                         if not chunk:
                             break
                         f.write(chunk)
                         done += len(chunk)
                         self.progress.emit(done, total)
-            self.finished.emit(True, new_path)
+            # --- verify the download is complete and looks like an exe ---
+            actual = os.path.getsize(new_path)
+            if total and actual != total:
+                return False, (f"incomplete download: got {actual:,} of "
+                               f"{total:,} bytes")
+            if actual < 1_000_000:
+                return False, (f"downloaded file is too small ({actual:,} bytes) "
+                               f"to be the app")
+            with open(new_path, "rb") as f:
+                if f.read(2) != b"MZ":
+                    return False, "downloaded file is not a valid Windows program"
+            return True, ""
         except Exception as e:
-            self.finished.emit(False, f"{type(e).__name__}: {e}")
+            return False, f"{type(e).__name__}: {e}"
 
 
 def apply_update_and_restart(new_exe: str) -> bool:

@@ -143,14 +143,20 @@ Updates: `check_updates_on_launch` + GitHub token in keyring (`github_token`).
 
 ## Status
 
-**v1.1.2.** Adds self-update, the Deluge completion check, and a browser/sync
-fix so symlinked files show and download. All modules compile; the FTP
-parsing/path/dedup, version-compare, Deluge completion and name-matching logic
-are unit-tested; the full `MainWindow` (with the new Deluge + Updates UI and the
-update-result flows) constructs and runs cleanly headless. Not testable from the
-build sandbox: live FTP (egress blocked) and the live GitHub API (the shared
-sandbox IP is rate-limited) - verify a real transfer and an update check on the
-actual machine. The repo is now **public**, so updates work without a token.
+**v1.2.5.** Core app, scheduler, tray, remote picker, Deluge gate, self-updater
+and the symlink fix are all in. The long-running FTPS download failure on the
+user's seedbox (usbx.me, vsFTPd 3.0.3) is **resolved** - downloads complete on
+the real machine. See "FTPS notes" below for the full root cause and the fix
+(reconnect the command channel for the download phase). All modules compile; the
+FTP parsing/path/dedup, version-compare, Deluge logic, the download read logic
+(binary mode + stop-at-size + unclean-close tolerance), the reuse fallback and
+the connection-error detector are unit-tested; the full `MainWindow` constructs
+and runs cleanly headless.
+
+Sandbox limits: live FTP egress is blocked and the shared GitHub API IP is
+rate-limited, so FTPS transfers and update flows are validated with headless Qt
+smoke tests and unit tests of the pure logic, then confirmed on the real
+machine. The repo is **public**, so updates work without a token.
 
 ## Possible next steps (not yet built)
 
@@ -173,5 +179,48 @@ actual machine. The repo is now **public**, so updates work without a token.
 - Author credit `Written by LJ "HawaiizFynest" Eblacas` on applicable files.
 
 
-## FTPS download fix (v1.2.0)
-Root cause of the EOF / BAD_LENGTH download failures: `_retrieve` read the RETR data channel with a raw recv loop that ran until the server closed the connection, and vsFTPd closes the encrypted data channel without a clean TLS shutdown - that final read raised the SSL error. It also never sent TYPE I, so transfers ran in ASCII mode. Fix: `_retrieve` now issues `TYPE I` and accepts `expected_remaining`; when the size is known it stops as soon as that many bytes arrive (before the close). Unknown-size reads fall back to read-to-EOF and treat EOF/UNEXPECTED/BAD_LENGTH/SHUTDOWN SSL errors as a normal end of stream. download() still verifies the final byte count (size_mismatch). NOTE: usbx.me requires PROT P (clear data channel returns error_perm 522), so 'Encrypt file transfers' must stay ON.
+## FTPS notes (download fix journey - read before touching ftpclient.py)
+
+The user's seedbox (usbx.me, vsFTPd 3.0.3, self-signed cert -> verify TLS off)
+REQUIRES an encrypted data channel: a clear data channel (prot_c) is rejected
+with `error_perm 522`, so "Encrypt file transfers" must stay ON for this server.
+
+Dead ends (recorded so they are not repeated):
+- Downloads failed with "EOF occurred in violation of protocol", then
+  "[SSL: BAD_LENGTH] bad length", while directory listings worked fine.
+- TLS 1.2 pinning, a custom recv loop, and TLS session reuse did NOT fix it.
+  Session reuse was actively harmful: it shares one TLS session between the
+  control and data connections, which poisons the control channel on this
+  server. Default is now NO reuse (`_ReuseFTP_TLS._reuse_session = False`) - a
+  full handshake per data connection, each with a fresh SSL context
+  (`_data_context_factory`).
+
+What `_retrieve` does (all correct, keep it):
+- Sends `TYPE I` (binary) so the wire byte count matches the server-reported
+  size (ASCII mode would translate newlines and corrupt files).
+- Accepts `expected_remaining` and STOPS reading the instant that many bytes
+  arrive - deliberately before the server's unclean TLS close, which is what
+  produced the EOF/BAD_LENGTH on the data read. Unknown-size falls back to
+  read-to-EOF and treats EOF/UNEXPECTED/BAD_LENGTH/SHUTDOWN as end-of-stream.
+- download() still verifies the final byte count (size_mismatch).
+- Errors are stage-tagged: "control channel (PASV/command)" vs "data TLS
+  handshake". The data-channel path flips reuse once if a handshake is refused
+  (for servers that genuinely require reuse), but reuse stays off by default.
+
+THE ACTUAL FIX (v1.2.5): the remaining failure was on the COMMAND channel, not
+the data channel. After a directory listing the control connection starts
+returning `[SSL: BAD_LENGTH]` on the next PASV/RETR ("setup failed at control
+channel"). A fresh login is always clean, so SyncWorker now:
+  1. Reconnects (quit + connect) for the download phase right after the walk, so
+     downloads run on a control channel that has not just done a listing.
+  2. Reconnects and retries any single file that fails with a connection-level
+     error (`_is_connection_error` in worker.py), as a safety net.
+This is what made downloads succeed on the user's box.
+
+OUTSTANDING - self-updater DLL error: auto-update detects + downloads the new
+build, swaps and relaunches, but the relaunched one-file exe sometimes dies with
+"failed to load python DLL _MEI...\\python312.dll". Looks like the auto-update
+download produces an incomplete exe. Until fixed, install updates by downloading
+Trawl.exe from the GitHub release manually. (The relaunch batch itself was fixed
+in v1.2.3: ping-based delays, rename-aside swap, `start "" "%OLD%"` with no /D,
+CREATE_NO_WINDOW only; it logs to %APPDATA%\\Trawl\\logs\\update.log.)
