@@ -20,6 +20,7 @@ from config import Config
 from database import Database
 from deluge import DelugeClient
 from ftpclient import FtpClient, RemoteFile
+from version import __version__
 
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -166,6 +167,10 @@ class SyncWorker(QObject):
             self.status.emit("Connecting...")
             welcome = client.connect()
             self.log.emit("info", (welcome or "Connected.").strip())
+            self.log.emit("info", (
+                f"Trawl {__version__} | data channel: "
+                f"{'encrypted (PROT P)' if self.cfg.ftps_encrypt_data else 'clear (PROT C)'}"
+                f" | scanning {root}"))
 
             self.status.emit("Scanning remote directory...")
             all_files = list(client.walk(root, recursive=self.cfg.recursive))

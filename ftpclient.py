@@ -38,6 +38,11 @@ class _LocalWriteError(Exception):
         self.original = original
 
 
+class _XferError(Exception):
+    """A data-channel transfer failure, tagged with where it happened (the TLS
+    data-connection setup vs. the read) so the log can pinpoint the cause."""
+
+
 class _ReuseFTP_TLS(ftplib.FTP_TLS):
     """FTP_TLS that reuses the control connection's TLS session on the data
     connection. Many FTPS servers (and most seedboxes) require this, and it is
@@ -271,7 +276,12 @@ class FtpClient:
             self.ftp.voidcmd("TYPE I")
         except ftplib.all_errors:
             pass
-        conn, _ = self.ftp.ntransfercmd(cmd, rest)
+        try:
+            conn, _ = self.ftp.ntransfercmd(cmd, rest)
+        except ftplib.Error:
+            raise  # REST/RETR refusals propagate for the resume fallback
+        except (ssl.SSLError, OSError) as e:
+            raise _XferError(f"data-channel setup failed: {e}") from e
         received = 0
         try:
             while True:
@@ -292,7 +302,8 @@ class FtpClient:
                             "EOF", "UNEXPECTED", "BAD_LENGTH", "BAD LENGTH",
                             "SHUTDOWN")):
                         break
-                    raise
+                    raise _XferError(
+                        f"read failed after {received} bytes: {e}") from e
                 except OSError:
                     # Plain-socket close mid-read (clear data channel).
                     break
@@ -368,6 +379,8 @@ class FtpClient:
             return ("stopped", "")
         except _LocalWriteError as e:
             return ("write_error", str(e.original))
+        except _XferError as e:
+            return ("error", str(e))
         except (ssl.SSLError, ftplib.Error, OSError, EOFError) as e:
             # connection / transfer problems (local file errors are tagged above)
             return ("error", str(e))
