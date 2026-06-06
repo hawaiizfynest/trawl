@@ -45,12 +45,14 @@ class _XferError(Exception):
 
 class _ReuseFTP_TLS(ftplib.FTP_TLS):
     """FTP_TLS that can reuse the control connection's TLS session on the data
-    connection. Some FTPS servers require session reuse; others reject or choke
-    on a reused session for file transfers (surfacing as '[SSL: BAD_LENGTH]').
-    `_reuse_session` selects the behaviour and FtpClient flips it automatically
-    on failure, so both kinds of server work."""
+    connection. Some FTPS servers require session reuse; others (vsFTPd as
+    configured on many seedboxes) get a poisoned TLS session from it and then
+    fail every data transfer with '[SSL: BAD_LENGTH]'. Default is therefore NO
+    reuse - a fresh full handshake per data connection, so nothing is poisoned -
+    and FtpClient flips to reuse only if a full handshake is refused, so both
+    kinds of server work."""
 
-    _reuse_session = True
+    _reuse_session = False
 
     def ntransfercmd(self, cmd, rest=None):
         conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
@@ -119,9 +121,10 @@ class FtpClient:
         # sidesteps SSL data-channel errors (EOF / BAD_LENGTH) on servers that
         # don't transfer file data cleanly over TLS.
         self.encrypt_data = encrypt_data
-        # Set True the first time a download falls back from session reuse to a
-        # full TLS handshake, so the UI can report it.
+        # Set True the first time a download flips the session-reuse mode, so the
+        # UI can report it; _reuse_retry_done ensures we only flip once.
         self._reuse_fell_back = False
+        self._reuse_retry_done = False
         self.ftp: Optional[ftplib.FTP] = None
 
     # ---- TLS context ----
@@ -298,13 +301,15 @@ class FtpClient:
         except ftplib.Error:
             raise  # REST/RETR refusals propagate for the resume fallback
         except (ssl.SSLError, OSError) as e:
-            # The data-channel TLS handshake failed. If we were reusing the
-            # control session, that's almost certainly the cause (the classic
-            # '[SSL: BAD_LENGTH]' on file transfers). Drop session reuse, clear
-            # the aborted transfer's control response, and retry once with a
-            # full handshake.
-            if getattr(self.ftp, "_reuse_session", False):
-                self.ftp._reuse_session = False
+            # The data-channel TLS handshake failed. The usual cause is the
+            # server's session-reuse policy (reuse poisons some servers, others
+            # require it). Flip the reuse mode once, clear the aborted
+            # transfer's control response, and retry. Whichever mode the server
+            # actually wants, this finds it; if both fail it isn't a reuse issue.
+            if not self._reuse_retry_done:
+                self._reuse_retry_done = True
+                self.ftp._reuse_session = not getattr(
+                    self.ftp, "_reuse_session", False)
                 self._reuse_fell_back = True
                 try:
                     self.ftp.voidresp()
@@ -314,8 +319,8 @@ class FtpClient:
                     conn, _ = self.ftp.ntransfercmd(cmd, rest)
                 except (ssl.SSLError, OSError) as e2:
                     raise _XferError(
-                        f"data-channel setup failed (with and without session "
-                        f"reuse): {e2}") from e2
+                        f"data-channel setup failed (both with and without "
+                        f"session reuse): {e2}") from e2
             else:
                 raise _XferError(f"data-channel setup failed: {e}") from e
         received = 0

@@ -237,9 +237,8 @@ class SyncWorker(QObject):
 
                 if client._reuse_fell_back and not reuse_note_shown:
                     reuse_note_shown = True
-                    self.log.emit("info", "Server rejected TLS session reuse on the "
-                                          "data channel; using a full handshake per "
-                                          "transfer instead.")
+                    self.log.emit("info", "Adjusted the TLS data-channel mode "
+                                          "(session reuse) to match the server.")
 
                 if result == "completed":
                     db.record(rf.path, rf.size, rf.modify_epoch, local_path, "completed")

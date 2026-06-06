@@ -223,7 +223,6 @@ set "PID={pid}"
 set "OLD={current}"
 set "NEW={new_exe}"
 set "LOG={log_path}"
-for %%I in ("%OLD%") do set "OLDDIR=%%~dpI"
 > "%LOG%" echo [update] start pid=%PID%
 >> "%LOG%" echo [update] OLD=%OLD%
 >> "%LOG%" echo [update] NEW=%NEW%
@@ -252,7 +251,7 @@ goto rename
 
 :renamefail
 >> "%LOG%" echo [update] ERROR could not move old exe aside; relaunching existing
-start "" /D "%OLDDIR%" "%OLD%"
+start "" "%OLD%"
 goto cleanup
 
 :renamed
@@ -264,7 +263,7 @@ move /Y "%OLD%.old" "%OLD%" >> "%LOG%" 2>&1
 
 :launch
 >> "%LOG%" echo [update] launching %OLD%
-start "" /D "%OLDDIR%" "%OLD%"
+start "" "%OLD%"
 
 :cleanup
 ping -n 2 127.0.0.1 >NUL
@@ -275,12 +274,15 @@ del "%~f0" >NUL 2>&1
     with open(bat, "w", encoding="utf-8") as f:
         f.write(script)
 
-    DETACHED_PROCESS = 0x00000008
+    # CREATE_NO_WINDOW hides the console while still giving the batch a (hidden)
+    # console so find/ping/tasklist work; CREATE_NEW_PROCESS_GROUP lets it
+    # outlive this process. (DETACHED_PROCESS together with CREATE_NO_WINDOW is
+    # contradictory and can pop a visible window, so it is not used.)
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     CREATE_NO_WINDOW = 0x08000000
     subprocess.Popen(
         ["cmd", "/c", bat],
-        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+        creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
         close_fds=True,
     )
     return True
